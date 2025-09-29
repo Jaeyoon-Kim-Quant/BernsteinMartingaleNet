@@ -6,7 +6,7 @@ Stanford CS 230 Project. Deep learning architecture for learning martingales.
 
 ## TODO
 - [x] Add market data downloader - @Jaeyoon
-- [ ] Add Bernstein Logistic Distribution library - @Jaeyoon
+- [x] Add Bernstein Logistic Distribution library - @Jaeyoon
 - [ ] Add Distribution learning example on independent data - @Jaeyoon
 - [ ] Demonstrate how distribution changes based on looking at $x_{t-1}$
 - [ ] Explore different datasets
