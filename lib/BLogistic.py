@@ -45,7 +45,7 @@ class BLogistic:
         mus = np.insert(mus, 0, 0)
         mus = torch.tensor(mus, dtype=DT, device=self.device)  # integral of lg(x/(1-x)) x ^ n
 
-        return mus, get_bernstein_to_standard_matrix(degree)
+        return mus, torch.tensor(get_bernstein_to_standard_matrix(degree), dtype=DT, device=self.device)
     
     def logpdf(self, xs, coeffs):
         """
@@ -99,7 +99,7 @@ class SkewedBLogistic:
     def __init__(self, degree: int, device: torch.device = None):
         self.degree = degree
         self.device = device if device is not None else torch.device('cpu')
-        self.bernstein_to_standard_matrix_torch = get_bernstein_to_standard_matrix(degree)
+        self.bernstein_to_standard_matrix_torch = torch.tensor(get_bernstein_to_standard_matrix(degree), dtype=DT, device=self.device)
         self.euler_gamma = torch.tensor(EulerGamma, dtype=DT, device=self.device)
     
     def get_mus(self, skewness):
@@ -107,30 +107,33 @@ class SkewedBLogistic:
         mus = (self.euler_gamma + torch.digamma(1 + (skewness * (powers + 1)))) / (powers + 1) - 1 / (skewness * (powers + 1) ** 2)
         return mus
 
-    def _process_input(self, xs, coeffs, raw_scale, raw_scaleskewness):
+    def _process_input(self, xs, coeffs, raw_scale, raw_skewness):
         normalized_coeffs = torch.softmax(coeffs, dim=0) * (self.degree + 1)
         standard_coeffs = self.bernstein_to_standard_matrix_torch @ normalized_coeffs
-        scale = torch.softplus(raw_scale)
-        skewness = torch.softplus(raw_scaleskewness)
+        scale = torch.nn.functional.softplus(raw_scale)
+        skewness = torch.nn.functional.softplus(raw_skewness)
 
         mus = self.get_mus(skewness)
         mean = torch.dot(mus, standard_coeffs)
 
         shifted_xs = (xs + mean) / scale
         Fx = (1.0 + torch.exp(-shifted_xs)) ** -skewness
-        return shifted_xs, standard_coeffs, Fx, scale
+        return shifted_xs, standard_coeffs, Fx, scale, skewness
 
-    def logpdf(self, xs, coeffs, raw_scale, raw_scaleskewness):
-        shifted_xs, standard_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale, raw_scaleskewness)
+    def logpdf(self, xs, coeffs, raw_scale, raw_skewness):
+        shifted_xs, standard_coeffs, Fx, scale, skewness = self._process_input(xs, coeffs, raw_scale, raw_skewness)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
 
-        log_fprime = -shifted_xs - 2 * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
+        log_fprime = torch.log(skewness) - shifted_xs - (skewness + 1) * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
         u_p = torch.pow(Fx.unsqueeze(-1), powers)
         poly = torch.sum(u_p * standard_coeffs, dim=-1)
         return torch.log(poly) + log_fprime
     
-    def cdf(self, xs, coeffs, raw_scale, raw_scaleskewness):
-        shifted_xs, standard_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale, raw_scaleskewness)
+    def pdf(self, xs, coeffs, raw_scale, raw_skewness):
+        return torch.exp(self.logpdf(xs, coeffs, raw_scale, raw_skewness))
+
+    def cdf(self, xs, coeffs, raw_scale, raw_skewness):
+        shifted_xs, standard_coeffs, Fx, scale, skewness = self._process_input(xs, coeffs, raw_scale, raw_skewness)
 
         powers = torch.arange(0, self.degree + 1, dtype=DT, device=self.device) + 1
         cdf_terms = torch.pow(Fx.unsqueeze(-1), powers) / powers
