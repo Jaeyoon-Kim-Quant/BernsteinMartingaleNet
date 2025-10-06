@@ -22,75 +22,6 @@ def get_bernstein_to_standard_matrix(degree):
             bernstein_to_standard_matrix[l, v] = comb(degree, l) * comb(l, v) * (-1)**(l-v)
     return bernstein_to_standard_matrix
 
-class BLogistic:
-    """
-    Bernstein Logistic distribution class that allows evaluation of logpdf_x for different degrees.
-    """
-    
-    def __init__(self, degree: int, device: torch.device = None):
-        """
-        Initialize the BLogistic class with a specific degree.
-        
-        Args:
-            degree: The degree of the Bernstein polynomial
-            device: The device to place tensors on (defaults to CPU)
-        """
-        self.degree = degree
-        self.device = device if device is not None else torch.device('cpu')
-        self.mus, self.bernstein_to_standard_matrix_torch = self._initialize_consts(degree)
-    
-    def _initialize_consts(self, degree):
-        """Initialize constants for the given degree."""
-        mus = np.cumsum(1 / np.arange(1, degree+1)) / (np.arange(1, degree+1) + 1)
-        mus = np.insert(mus, 0, 0)
-        mus = torch.tensor(mus, dtype=DT, device=self.device)  # integral of lg(x/(1-x)) x ^ n
-
-        return mus, torch.tensor(get_bernstein_to_standard_matrix(degree), dtype=DT, device=self.device)
-    
-    def logpdf(self, xs, coeffs):
-        """
-        Compute the log probability density function for given x values and coefficients.
-        
-        Args:
-            xs: torch.Tensor, shape (batch,) or similar - input values
-            coeffs: torch.Tensor, shape (degree+1,) - Bernstein polynomial coefficients
-            
-        Returns:
-            torch.Tensor: log probability density values
-        """
-        # coeffs: torch.Tensor, shape (n+1,)
-        # xs: torch.Tensor, shape (batch,) or similar
-        normalized_coeffs = torch.softmax(coeffs, dim=0) * (self.degree + 1)
-        standard_coeffs = self.bernstein_to_standard_matrix_torch @ normalized_coeffs
-        mean = torch.dot(self.mus, standard_coeffs)
-        shifted_xs = xs + mean
-
-        log_fprime = -shifted_xs - 2 * torch.nn.functional.softplus(-shifted_xs)
-        Fx = 1.0 / (1.0 + torch.exp(-shifted_xs))
-        u_p = torch.pow(Fx.unsqueeze(-1), torch.arange(0, self.degree+1, dtype=DT, device=self.device))
-        poly = torch.sum(u_p * standard_coeffs, dim=-1)
-        return torch.log(poly) + log_fprime
-
-    def pdf(self, xs, coeffs):
-        """
-        Compute the probability density function for given x values and coefficients.
-        """
-        return torch.exp(self.logpdf(xs, coeffs))
-    
-    def cdf(self, xs, coeffs):
-        """
-        Compute the cumulative distribution function for given x values and coefficients.
-        """
-        normalized_coeffs = torch.softmax(coeffs, dim=0) * (self.degree + 1)
-        standard_coeffs = self.bernstein_to_standard_matrix_torch @ normalized_coeffs
-        mean = torch.dot(self.mus, standard_coeffs)
-        shifted_xs = xs + mean
-        Fx = 1.0 / (1.0 + torch.exp(-shifted_xs))
-        powers = torch.arange(0, self.degree + 1, dtype=DT, device=self.device) + 1
-        cdf_terms = torch.pow(Fx.unsqueeze(-1), powers) / powers
-        cdf_val = torch.sum(cdf_terms * standard_coeffs, dim=-1)
-        return cdf_val
-
 class SkewedBLogistic:
     """
     Modify BLogistic use Generalized logistic distribution type I to make it skewed.
@@ -140,6 +71,47 @@ class SkewedBLogistic:
         cdf_val = torch.sum(cdf_terms * standard_coeffs, dim=-1)
         return cdf_val
 
+class BLogistic:
+    """
+    Bernstein Logistic distribution class that delegates to SkewedBLogistic with skew parameter set to 0.
+    """
+    def __init__(self, degree: int, device: torch.device = None):
+        self.degree = degree
+        self.device = device if device is not None else torch.device('cpu')
+        self._skewed = SkewedBLogistic(degree=degree, device=self.device)
+        # For compatibility, store a dummy scale and skew parameter (skew=0)
+        self._raw_skew = torch.tensor(0.0, dtype=DT, device=self.device)
+
+    def logpdf(self, xs, coeffs, raw_scale):
+        # skewness=0, so SkewedBLogistic reduces to symmetric
+        return self._skewed.logpdf(xs, coeffs, raw_scale, self._raw_skew)
+
+    def pdf(self, xs, coeffs, raw_scale):
+        return self._skewed.pdf(xs, coeffs, raw_scale, self._raw_skew)
+
+    def cdf(self, xs, coeffs, raw_scale):
+        return self._skewed.cdf(xs, coeffs, raw_scale, self._raw_skew)
+
+def get_ppf(blogistic, params, ps, max_scale=20, num_steps=100):
+    scale = torch.nn.functional.softplus(params[1])
+    left = -max_scale * scale
+    right = max_scale * scale
+    if blogistic.cdf(left, *params) > torch.min(ps):
+        raise ValueError("The minimum value of ps is too small")
+    if blogistic.cdf(right, *params) < torch.max(ps):
+        raise ValueError("The maximum value of ps is too large")
+
+    # implement vectorized binary search
+    lefts = torch.ones_like(ps) * left
+    rights = torch.ones_like(ps) * right
+
+    for i in range(num_steps):
+        mids = (lefts + rights) / 2
+        cdfs = blogistic.cdf(mids, *params)
+        lefts = torch.where(cdfs < ps, mids, lefts)
+        rights = torch.where(cdfs > ps, mids, rights)
+
+    return mids
 
 if __name__ == "__main__":
     # example usage
