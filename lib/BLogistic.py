@@ -113,6 +113,36 @@ def get_ppf(blogistic, params, ps, max_scale=20, num_steps=100):
 
     return mids
 
+def train_blogistic(xs, dof, lr, num_steps, allow_skew, device: torch.device = None):
+    if allow_skew:
+        degree = dof - 3
+        blogistic = SkewedBLogistic(degree=degree, device=device)
+        skew_param = torch.nn.Parameter(torch.tensor(0.0, device=device))
+        scale_param = torch.nn.Parameter(torch.tensor(0.0, device=device))
+        raw_coeffs = torch.nn.Parameter(torch.randn(degree + 1, device=device))
+        params = [raw_coeffs, scale_param, skew_param]
+    else:
+        degree = dof - 2
+        blogistic = BLogistic(degree=degree, device=device)
+        scale_param = torch.nn.Parameter(torch.tensor(0.0, device=device))
+        raw_coeffs = torch.nn.Parameter(torch.randn(degree + 1, device=device))
+        params = [raw_coeffs, scale_param]
+    
+    nll = lambda xs_batch: -torch.mean(blogistic.logpdf(xs_batch, *params))
+    optimizer = torch.optim.Adam(params, lr=lr)
+
+    for step in range(1, num_steps + 1):
+        optimizer.zero_grad()
+        loss = nll(xs)
+        loss.backward()
+        optimizer.step()
+        if step % 100 == 0:
+            print(f"Step {step}, Loss: {loss.item():.4f}")
+
+    print(f"Step {step}, Final Loss: {loss.item():.4f}")
+    
+    return blogistic, params
+
 if __name__ == "__main__":
     # example usage
     degree = 3
