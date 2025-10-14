@@ -1,3 +1,5 @@
 MarketData/api_key.txt
 MarketData/*.log
+MarketData/historical_data
 .idea/
+lib/__pycache__
