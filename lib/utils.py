@@ -73,7 +73,7 @@ def get_sequence_data(folder_path, context_window, force_recompute=False):
         if data.shape[0] <= context_window:
             continue
         strides = np.array([data[i-context_window:i, :] for i in range(context_window, data.shape[0])])
-        y_vec = data[context_window:]
+        y_vec = data[context_window:, 0]
         if np.isnan(strides).any():
             print("nan in strides", date_str)
             continue
