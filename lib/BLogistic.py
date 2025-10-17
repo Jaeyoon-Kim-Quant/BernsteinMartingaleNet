@@ -50,7 +50,7 @@ class SkewedBLogistic:
         shifted_xs = (xs + mean) / scale
         Fx = (1.0 + torch.exp(-shifted_xs)) ** -skewness
         return shifted_xs, standard_coeffs, Fx, scale, skewness
-
+    
     def logpdf(self, xs, coeffs, raw_scale, raw_skewness):
         shifted_xs, standard_coeffs, Fx, scale, skewness = self._process_input(xs, coeffs, raw_scale, raw_skewness)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
@@ -58,6 +58,28 @@ class SkewedBLogistic:
         log_fprime = torch.log(skewness) - shifted_xs - (skewness + 1) * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
         u_p = torch.pow(Fx.unsqueeze(-1), powers)
         poly = torch.sum(u_p * standard_coeffs, dim=-1)
+        return torch.log(poly) + log_fprime
+
+    def _process_input_vectorized(self, xs, coeffs, raw_scale, raw_skewness):
+        normalized_coeffs = torch.softmax(coeffs, dim=1) * (self.degree + 1)
+        standard_coeffs = (self.bernstein_to_standard_matrix_torch @ normalized_coeffs.T).T
+        scale = torch.nn.functional.softplus(raw_scale).reshape(-1, 1)
+        skewness = torch.nn.functional.softplus(raw_skewness).reshape(-1, 1)
+
+        mus = self.get_mus(skewness)
+        mean = torch.sum(standard_coeffs * mus, dim=1)
+        mean = mean.reshape(-1, 1)
+
+        shifted_xs = (xs + mean) / scale
+        Fx = (1.0 + torch.exp(-shifted_xs)) ** -skewness
+        return shifted_xs, standard_coeffs, Fx, scale, skewness
+
+    def logpdf_vectorized(self, xs, coeffs, raw_scale, raw_skewness):
+        shifted_xs, standard_coeffs, Fx, scale, skewness = self._process_input_vectorized(xs, coeffs, raw_scale, raw_skewness)
+        powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
+        log_fprime = torch.log(skewness) - shifted_xs - (skewness + 1) * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
+        u_p = torch.pow(Fx, powers.reshape(1, -1))
+        poly = torch.sum(u_p * standard_coeffs, dim=-1).reshape(-1, 1)
         return torch.log(poly) + log_fprime
     
     def pdf(self, xs, coeffs, raw_scale, raw_skewness):
