@@ -10,7 +10,7 @@ import torch.optim as optim
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.utils import get_sequence_data
-from lib.BLogistic import SkewedBLogistic, train_blogistic
+from lib.BLogistic import SkewedBLogistic, train_blogistic, SplineLogistic, train_spline_logistic
 
 folder_path = r"../MarketData/historical_data"
 context_window = 60
@@ -59,6 +59,37 @@ class SimpleNN(nn.Module):
     def get_pdf(self, x, sample_xs):
         return torch.exp(self.get_logpdf(x, sample_xs))
 
+class SplineNN(nn.Module):
+    def __init__(self):
+        super(SplineNN, self).__init__()
+    def __init__(self):
+        super(SplineNN, self).__init__()
+        self.fc1 = nn.Linear(context_window, context_window)
+        self.fc2 = nn.Linear(context_window, dof)
+        with torch.no_grad():
+            self.fc1.weight *= 0.001
+            self.fc2.weight *= 0.001
+            self.fc1.bias *= 0
+            self.fc2.bias *= 0
+        self.dist = SplineLogistic(dof, device=device)
+
+    def forward(self, x, y):
+        layer1 = torch.relu(self.fc1(x))
+        params = self.fc2(layer1)
+        return -self.dist.logpdf_vectorized(y, params[:, :-1], params[:, -1]).mean()
+
+    def get_params(self, x):
+        layer1 = torch.relu(self.fc1(x))
+        params = self.fc2(layer1)
+        return params
+    
+    def get_logpdf(self, x, sample_xs):
+        params = self.get_params(x)
+        return self.dist.logpdf(sample_xs, params[:, :-1].flatten(), params[:, -1])
+
+    def get_pdf(self, x, sample_xs):
+        return torch.exp(self.get_logpdf(x, sample_xs))
+
 class ScaleNN(nn.Module):
     def __init__(self, offset):
         super(ScaleNN, self).__init__()
@@ -88,6 +119,42 @@ class ScaleNN(nn.Module):
 
     def get_pdf(self, x, sample_xs):
         return torch.exp(self.get_logpdf(x, sample_xs))
+
+def train_spline_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device: torch.device = None):
+    iid_train_steps = 500
+    iid_lr = 0.05
+    _, offset = train_spline_logistic(train_Y.flatten(), dof, iid_lr, iid_train_steps, device=device)
+    model = SplineNN().to(device)
+    with torch.no_grad():
+        model.fc2.bias[:-1].copy_(offset[0])
+        model.fc2.bias[-1].copy_(offset[1])
+
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    batch_size = train_X.shape[0] // 10
+    print("num batches", train_X.shape[0] // batch_size)
+    train_losses = []
+    dev_losses = []
+    for step in range(num_steps):
+        # run mini-batch training
+        for i in range(0, train_X.shape[0], batch_size):
+            batch_X = train_X[i:i+batch_size, :]
+            batch_Y = train_Y[i:i+batch_size, :]
+            loss = model(batch_X, batch_Y)
+            if loss.isnan():
+                #model.print_nan_params(batch_X, batch_Y)
+                exit()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        if step % 100 == 0:
+            train_loss = model(train_X, train_Y)
+            dev_loss = model(dev_X, dev_Y)
+            train_losses.append(train_loss.item())
+            dev_losses.append(dev_loss.item())
+
+            print(f"Step {step}, Train Loss: {train_loss.item():.4f}, Dev Loss: {dev_loss.item():.4f}")
+    return model, train_losses, dev_losses
 
 def train_scale_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device: torch.device = None):
     iid_train_steps = 1000
@@ -125,7 +192,7 @@ def train_scale_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device: torch.
 def train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device: torch.device = None, transfer_learn = True):
     model = SimpleNN().to(device)
     if transfer_learn:
-        iid_train_steps = 1000
+        iid_train_steps = 100
         iid_lr = 0.05
         _, offset = train_blogistic(train_Y.flatten(), dof, iid_lr, iid_train_steps, allow_skew=True, device=device)
         with torch.no_grad():
@@ -190,8 +257,9 @@ print("std", std, train_X.std())
 
 lr = 1e-3
 num_steps = 5000
-model, train_losses, dev_losses = train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
-torch.save(model.state_dict(), "simple_nn_model16_context60.pth")
+model, train_losses, dev_losses = train_spline_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
+#model, train_losses, dev_losses = train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
+torch.save(model.state_dict(), "simple_nn_model_spline16_context60.pth")
 #
 #plt.plot(train_losses, label="Train Loss")
 #plt.plot(dev_losses, label="Dev Loss")
@@ -199,7 +267,7 @@ torch.save(model.state_dict(), "simple_nn_model16_context60.pth")
 #plt.show()
 # load the model
 model = SimpleNN().to(device)
-model.load_state_dict(torch.load("simple_nn_model16_context60.pth"))
+model.load_state_dict(torch.load("simple_nn_model_spline16_context60.pth"))
 
 plot_xs = torch.linspace(-8, 8, 10000, device=device)
 nplots = 10
