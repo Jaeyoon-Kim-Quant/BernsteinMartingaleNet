@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sympy import EulerGamma
-
+from scipy.special import comb
 DT = torch.float64
 torch.set_default_dtype(DT)
 
@@ -24,14 +24,15 @@ def get_bernstein_to_standard_matrix(degree):
 
 class SkewedBLogistic:
     """
-    Modify BLogistic use Generalized logistic distribution type I to make it skewed.
+    Skewed Bernstein Logistic distribution class that uses the Bernstein polynomial to perterb the logistic distribution.
     """
 
     def __init__(self, degree: int, device: torch.device = None):
         self.degree = degree
         self.device = device if device is not None else torch.device('cpu')
-        self.bernstein_to_standard_matrix_torch = torch.tensor(get_bernstein_to_standard_matrix(degree), dtype=DT, device=self.device)
         self.euler_gamma = torch.tensor(EulerGamma, dtype=DT, device=self.device)
+        self.bernstein_to_standard_matrix_torch = torch.tensor(get_bernstein_to_standard_matrix(degree), dtype=DT, device=self.device)
+        self.comb = torch.tensor([comb(self.degree, i) for i in range(self.degree + 1)], dtype=DT, device=self.device).reshape(1, -1)
     
     def get_mus(self, skewness):
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
@@ -40,58 +41,58 @@ class SkewedBLogistic:
 
     def _process_input(self, xs, coeffs, raw_scale, raw_skewness):
         normalized_coeffs = torch.softmax(coeffs, dim=0) * (self.degree + 1)
-        standard_coeffs = self.bernstein_to_standard_matrix_torch @ normalized_coeffs
         scale = torch.nn.functional.softplus(raw_scale)
         skewness = torch.nn.functional.softplus(raw_skewness)
 
         mus = self.get_mus(skewness)
-        mean = torch.dot(mus, standard_coeffs)
+        mean = torch.dot(mus, self.bernstein_to_standard_matrix_torch @ normalized_coeffs)
 
         shifted_xs = (xs + mean) / scale
         Fx = (1.0 + torch.exp(-shifted_xs)) ** -skewness
-        return shifted_xs, standard_coeffs, Fx, scale, skewness
+        return shifted_xs, normalized_coeffs, Fx, scale, skewness
     
     def logpdf(self, xs, coeffs, raw_scale, raw_skewness):
-        shifted_xs, standard_coeffs, Fx, scale, skewness = self._process_input(xs, coeffs, raw_scale, raw_skewness)
+        shifted_xs, normalized_coeffs, Fx, scale, skewness = self._process_input(xs, coeffs, raw_scale, raw_skewness)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
+        reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
 
         log_fprime = torch.log(skewness) - shifted_xs - (skewness + 1) * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
+        # calculate bernstein polynomial
         u_p = torch.pow(Fx.unsqueeze(-1), powers)
-        poly = torch.sum(u_p * standard_coeffs, dim=-1)
+        u_m = torch.pow(1 - Fx.unsqueeze(-1), reversed_powers)
+        bernstein_poly = u_p * u_m * self.comb
+        poly = torch.sum(bernstein_poly * normalized_coeffs, dim=-1)
         return torch.log(poly) + log_fprime
 
     def _process_input_vectorized(self, xs, coeffs, raw_scale, raw_skewness):
         normalized_coeffs = torch.softmax(coeffs, dim=1) * (self.degree + 1)
-        standard_coeffs = (self.bernstein_to_standard_matrix_torch @ normalized_coeffs.T).T
         scale = torch.nn.functional.softplus(raw_scale).reshape(-1, 1)
         skewness = torch.nn.functional.softplus(raw_skewness).reshape(-1, 1)
 
         mus = self.get_mus(skewness)
-        mean = torch.sum(standard_coeffs * mus, dim=1)
+        mean = ((self.bernstein_to_standard_matrix_torch @ normalized_coeffs.T).T * mus).sum(dim=1)
         mean = mean.reshape(-1, 1)
 
         shifted_xs = (xs + mean) / scale
         Fx = (1.0 + torch.exp(-shifted_xs)) ** -skewness
-        return shifted_xs, standard_coeffs, Fx, scale, skewness
+        return shifted_xs, normalized_coeffs, Fx, scale, skewness
 
     def logpdf_vectorized(self, xs, coeffs, raw_scale, raw_skewness):
-        shifted_xs, standard_coeffs, Fx, scale, skewness = self._process_input_vectorized(xs, coeffs, raw_scale, raw_skewness)
+        shifted_xs, normalized_coeffs, Fx, scale, skewness = self._process_input_vectorized(xs, coeffs, raw_scale, raw_skewness)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
+        reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
         log_fprime = torch.log(skewness) - shifted_xs - (skewness + 1) * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
         u_p = torch.pow(Fx, powers.reshape(1, -1))
-        poly = torch.sum(u_p * standard_coeffs, dim=-1).reshape(-1, 1)
+        u_m = torch.pow(1 - Fx, reversed_powers.reshape(1, -1))
+        bernstein_poly = u_p * u_m * self.comb
+        poly = torch.sum(bernstein_poly * normalized_coeffs, dim=-1).reshape(-1, 1)
         return torch.log(poly) + log_fprime
     
     def pdf(self, xs, coeffs, raw_scale, raw_skewness):
         return torch.exp(self.logpdf(xs, coeffs, raw_scale, raw_skewness))
 
     def cdf(self, xs, coeffs, raw_scale, raw_skewness):
-        shifted_xs, standard_coeffs, Fx, scale, skewness = self._process_input(xs, coeffs, raw_scale, raw_skewness)
-
-        powers = torch.arange(0, self.degree + 1, dtype=DT, device=self.device) + 1
-        cdf_terms = torch.pow(Fx.unsqueeze(-1), powers) / powers
-        cdf_val = torch.sum(cdf_terms * standard_coeffs, dim=-1)
-        return cdf_val
+        raise NotImplementedError("CDF not implemented for SkewedBLogistic")
 
 class BLogistic:
     """
@@ -138,6 +139,7 @@ def get_ppf(blogistic, params, ps, max_scale=20, num_steps=100):
 def train_blogistic(xs, dof, lr, num_steps, allow_skew, device: torch.device = None):
     if allow_skew:
         degree = dof - 3
+        #blogistic = SkewedBLogistic(degree=degree, device=device)
         blogistic = SkewedBLogistic(degree=degree, device=device)
         skew_param = torch.nn.Parameter(torch.tensor(0.0, device=device))
         scale_param = torch.nn.Parameter(torch.tensor(0.0, device=device))
