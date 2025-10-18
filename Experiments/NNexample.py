@@ -26,8 +26,8 @@ class SimpleNN(nn.Module):
         self.fc1 = nn.Linear(context_window, context_window)
         self.fc2 = nn.Linear(context_window, dof)
         with torch.no_grad():
-            self.fc1.weight *= 0.001
-            self.fc2.weight *= 0.001
+            self.fc1.weight *= 0.01
+            self.fc2.weight *= 0.01
             self.fc1.bias *= 0
             self.fc2.bias *= 0
         self.blogistic = SkewedBLogistic(dof - 3, device=device)
@@ -257,8 +257,8 @@ print("std", std, train_X.std())
 
 lr = 1e-3
 num_steps = 5000
-model, train_losses, dev_losses = train_spline_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
-#model, train_losses, dev_losses = train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
+#model, train_losses, dev_losses = train_spline_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
+model, train_losses, dev_losses = train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
 torch.save(model.state_dict(), "simple_nn_model_spline16_context60.pth")
 #
 #plt.plot(train_losses, label="Train Loss")
