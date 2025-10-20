@@ -10,13 +10,13 @@ import torch.optim as optim
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.utils import get_sequence_data
-from lib.BLogistic import SkewedBLogistic, train_blogistic, SplineLogistic, train_spline_logistic
+from lib.BLogistic import BLogistic, train_blogistic, SplineLogistic, train_spline_logistic
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # get data
 folder_path = r"../MarketData/historical_data"
-context_window = 20
+context_window = 10
 X, Y = get_sequence_data(folder_path, context_window, force_recompute=False)
 dof = 16
 simple_X = torch.tensor(X[:, :, 0], device=device)
@@ -51,12 +51,12 @@ class SimpleNN(nn.Module):
             self.fc2.weight *= 0.01
             self.fc1.bias *= 0
             self.fc2.bias *= 0
-        self.blogistic = SkewedBLogistic(dof - 3, device=device)
+        self.blogistic = BLogistic(dof - 2, device=device)
 
     def forward(self, x, y):
         layer1 = torch.relu(self.fc1(x))
         params = self.fc2(layer1)
-        return -self.blogistic.logpdf_vectorized(y, params[:, :-2], params[:, -2], params[:, -1]).mean()
+        return -self.blogistic.logpdf(y.reshape(-1, 1), params[:, :-1], params[:, -1]).mean()
      
     def print_nan_params(self, x, y):
         layer1 = torch.relu(self.fc1(x))
@@ -75,7 +75,7 @@ class SimpleNN(nn.Module):
     
     def get_logpdf(self, x, sample_xs):
         params = self.get_params(x)
-        return self.blogistic.logpdf(sample_xs, params[:, :-2].flatten(), params[:, -2], params[:, -1])
+        return self.blogistic.logpdf(sample_xs, params[:, :-1].reshape(1, -1), params[:, -1])
 
     def get_pdf(self, x, sample_xs):
         return torch.exp(self.get_logpdf(x, sample_xs))
@@ -83,13 +83,12 @@ class SimpleNN(nn.Module):
 def train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device: torch.device = None, transfer_learn = True):
     model = SimpleNN().to(device)
     if transfer_learn:
-        iid_train_steps = 500
+        iid_train_steps = 300
         iid_lr = 0.05
-        _, offset = train_blogistic(train_Y.flatten(), dof, iid_lr, iid_train_steps, allow_skew=True, device=device)
+        _, offset = train_blogistic(train_Y, dof, iid_lr, iid_train_steps, device=device)
         with torch.no_grad():
-            model.fc2.bias[:-2].copy_(offset[0])
-            model.fc2.bias[-2].copy_(offset[1])
-            model.fc2.bias[-1].copy_(offset[2])
+            model.fc2.bias[:-1].copy_(offset[0])
+            model.fc2.bias[-1].copy_(offset[1])
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     batch_size = train_X.shape[0]
     print("num batches", train_X.shape[0] // batch_size)
@@ -116,21 +115,22 @@ def train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device: torch
 
 lr = 1e-3
 num_steps = 3000
-#model, train_losses, dev_losses = train_spline_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
 model, train_losses, dev_losses = train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
 torch.save(model.state_dict(), "simple_nn_model_spline16_context10.pth")
 model = SimpleNN().to(device)
 model.load_state_dict(torch.load("simple_nn_model_spline16_context10.pth"))
 
-plot_xs = torch.linspace(-8, 8, 10000, device=device)
+plot_xs = torch.linspace(-20, 20, 100000, device=device)
 nplots = 10
 
 for idx in range(nplots):
     # get color wheel
     color = plt.cm.viridis(idx / nplots)
-    plot_ys = model.get_pdf(dev_X[idx, :].reshape(1, -1), plot_xs)
-    plt.plot(plot_xs.cpu().numpy(), plot_ys.detach().cpu().numpy(), color=color)
+    pdf = model.get_pdf(dev_X[idx, :].reshape(1, -1), plot_xs)
+    plt.plot(plot_xs.cpu().numpy(), pdf.detach().cpu().numpy(), color=color)
     plt.scatter(dev_Y[idx, :].cpu().numpy(), model.get_pdf(dev_X[idx, :].reshape(1, -1), dev_Y[idx, :].reshape(1, 1)).detach().cpu().numpy(), color=color)
+    mean = (plot_xs @ pdf).item() * torch.diff(plot_xs).mean().item()
+    print("mean", mean)
 
 plt.xlabel("Return")
 plt.ylabel("PDF")
