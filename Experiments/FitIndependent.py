@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # import BLogistic from lib/BLogistic.py
-from lib.BLogistic import BLogistic, SkewedBLogistic, get_ppf, train_blogistic, train_spline_blogistic
+from lib.BLogistic import BLogistic, get_ppf, train_blogistic
 from lib.utils import load_data
 
 # Set device (GPU if available, otherwise CPU)
@@ -20,13 +20,14 @@ torch_xs = torch.tensor(xs, device=device)
 dof = 16
 lr = 0.1
 num_steps = 1000
-#model, params = train_blogistic(torch_xs, dof, lr, num_steps, allow_skew=True, device=device)
-model, params = train_spline_blogistic(torch_xs, dof, lr, num_steps, device=device)
+model, params = train_blogistic(torch_xs.reshape(-1, 1), dof, lr, num_steps, device=device)
+#model, params = train_spline_blogistic(torch_xs, dof, lr, num_steps, device=device)
 
-plot_xs = torch.linspace(-12, 12, 10000)
+plot_xs = torch.linspace(-20, 20, 1000000)
 fig, ax = plt.subplots(1, 2)
-pdf = model.pdf(plot_xs.to(device), *params).cpu().detach().numpy()
-print(pdf.sum().item() * np.diff(plot_xs.cpu().numpy()).mean())
+pdf = model.pdf(plot_xs.to(device).reshape(-1, 1), *params).cpu().detach().numpy()
+mean = (plot_xs.numpy() @ pdf) * np.diff(plot_xs.numpy()).mean()
+print("mean", mean)
 ax[0].plot(plot_xs.numpy(), pdf, label="BLogistic")
 ax[0].hist(xs, bins=512, density=True, label="Data")
 ax[0].set_title("PDF")

@@ -15,13 +15,6 @@ from scipy.special import comb
 DT = torch.float64
 torch.set_default_dtype(DT)
 
-def get_bernstein_to_standard_matrix(degree):
-    bernstein_to_standard_matrix = np.zeros((degree+1, degree+1))
-    for v in range(degree+1):
-        for l in range(v, degree+1):
-            bernstein_to_standard_matrix[l, v] = comb(degree, l) * comb(l, v) * (-1)**(l-v)
-    return bernstein_to_standard_matrix
-
 class BLogistic:
     """
     Bernstein Logistic distribution class that uses the Bernstein polynomial to perterb the logistic distribution.
@@ -30,8 +23,6 @@ class BLogistic:
     def __init__(self, degree: int, device: torch.device = None):
         self.degree = degree
         self.device = device if device is not None else torch.device('cpu')
-        #self.euler_gamma = torch.tensor(EulerGamma, dtype=DT, device=self.device)
-        #self.bernstein_to_standard_matrix_torch = torch.tensor(get_bernstein_to_standard_matrix(degree), dtype=DT, device=self.device)
         self.comb = torch.tensor([comb(self.degree, i) for i in range(self.degree + 1)], dtype=DT, device=self.device).reshape(1, -1)
         self.mus = torch.tensor(self.get_mus(), dtype=DT, device=self.device)
     
@@ -52,40 +43,8 @@ class BLogistic:
         shifted_xs = xs.reshape(-1, 1) / scale + mean.reshape(-1, 1)
         Fx = (1.0 + torch.exp(-shifted_xs)) ** -1
         return shifted_xs, normalized_coeffs, Fx, scale
-    
+
     def logpdf(self, xs, coeffs, raw_scale):
-        shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
-        powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
-        reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
-
-        log_fprime = - shifted_xs - 2 * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
-        # calculate bernstein polynomial
-        u_p = torch.pow(Fx.unsqueeze(-1), powers)
-        u_m = torch.pow(1 - Fx.unsqueeze(-1), reversed_powers)
-        bernstein_poly = u_p * u_m * self.comb
-        poly = bernstein_poly @ normalized_coeffs
-
-        return torch.log(poly) + log_fprime
-    
-    def return_u(self, Fx):
-        powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
-        reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
-        u_p = torch.pow(Fx.unsqueeze(-1), powers)
-        u_m = torch.pow(1 - Fx.unsqueeze(-1), reversed_powers)
-        return u_p, u_m
-
-    def _process_input_vectorized(self, xs, coeffs, raw_scale):
-        normalized_coeffs = torch.softmax(coeffs, dim=1) * (self.degree + 1)
-        scale = torch.nn.functional.softplus(raw_scale).reshape(-1, 1)
-
-        mean = (normalized_coeffs @ self.mus).reshape(-1, 1)
-        print("internal mean", mean.item())
-
-        shifted_xs = (xs + mean) / scale
-        Fx = (1.0 + torch.exp(-shifted_xs)) ** -1
-        return shifted_xs, normalized_coeffs, Fx, scale
-
-    def logpdf_vectorized(self, xs, coeffs, raw_scale):
         shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
         reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
@@ -101,14 +60,6 @@ class BLogistic:
 
     def cdf(self, xs, coeffs, raw_scale):
         raise NotImplementedError("CDF not implemented for BLogistic")
-        #shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
-        #powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
-        #reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
-        #u_p = torch.pow(Fx.unsqueeze(-1), powers)
-        #u_m = torch.pow(1 - Fx.unsqueeze(-1), reversed_powers)
-        #bernstein_poly = u_p * u_m * self.comb
-        #poly = torch.sum(bernstein_poly * normalized_coeffs, dim=-1)
-        #return poly
 
 def get_ppf(blogistic, params, ps, max_scale=20, num_steps=100):
     scale = torch.nn.functional.softplus(params[1])
@@ -261,7 +212,7 @@ class SplineLogistic:
         scale = torch.nn.functional.softplus(raw_scale)
 
         mean = self.mus @ normalized_coeffs.reshape(-1, 1)
-        shifted_xs = (xs.reshape(-1, 1) + mean.reshape(-1, 1)) / scale
+        shifted_xs = xs.reshape(-1, 1) / scale + mean.reshape(-1, 1)
         Fx = 1.0 / (1.0 + torch.exp(-shifted_xs))  # logistic CDF
         spline_basis = self._bspline_basis(Fx) * self.normalization
         spline_combined = (spline_basis @ normalized_coeffs).reshape(-1, 1)
