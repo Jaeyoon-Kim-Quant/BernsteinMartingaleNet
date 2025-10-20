@@ -36,26 +36,20 @@ class BLogistic:
         self.mus = torch.tensor(self.get_mus(), dtype=DT, device=self.device)
     
     def get_mus(self):
-        #powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
-        #mus = (self.euler_gamma + torch.digamma(1 + (powers + 1))) / (powers + 1) - 1 / ((powers + 1) ** 2)
         harmonic_numbers = np.cumsum(1 / np.arange(1, self.degree+1))
         harmonic_numbers = np.concatenate([[0], harmonic_numbers])
         mus = np.zeros(self.degree+1)
         for i in range(self.degree+1):
             mus[i] = (harmonic_numbers[i] - harmonic_numbers[self.degree-i]) / (self.degree + 1)
-            #mus[i] = (harmonic_numbers[i + 1] - harmonic_numbers[self.degree-i]) * i/ ((self.degree + 1) * (self.degree + 2))
-        print("harmonic_numbers", harmonic_numbers, self.degree)
-        print("mus", mus)
         return mus
 
     def _process_input(self, xs, coeffs, raw_scale):
         normalized_coeffs = torch.softmax(coeffs, dim=-1) * (self.degree + 1)
-        scale = torch.nn.functional.softplus(raw_scale)
+        scale = torch.nn.functional.softplus(raw_scale).reshape(-1, 1)
 
         mean = normalized_coeffs @ self.mus
-        #print("internal mean", mean.item(), self.mus.cpu().numpy(), normalized_coeffs.cpu().numpy())
 
-        shifted_xs = (xs + mean) / scale
+        shifted_xs = xs.reshape(-1, 1) / scale + mean.reshape(-1, 1)
         Fx = (1.0 + torch.exp(-shifted_xs)) ** -1
         return shifted_xs, normalized_coeffs, Fx, scale
     
@@ -92,7 +86,6 @@ class BLogistic:
         return shifted_xs, normalized_coeffs, Fx, scale
 
     def logpdf_vectorized(self, xs, coeffs, raw_scale):
-        #shifted_xs, normalized_coeffs, Fx, scale = self._process_input_vectorized(xs, coeffs, raw_scale)
         shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
         reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
