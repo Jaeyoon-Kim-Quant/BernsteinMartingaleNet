@@ -6,6 +6,9 @@ import glob
 import datetime
 import exchange_calendars as ec
 from zoneinfo import ZoneInfo
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
 
 def load_data(file_path):
@@ -81,3 +84,39 @@ def get_sequence_data(folder_path, context_window, force_recompute=False):
         ys.extend(y_vec)
     np.savez(output_file_name, xs=np.array(xs), ys=np.array(ys))
     return np.array(xs), np.array(ys)
+
+def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, num_steps=1000, batch_size=None, device: torch.device = None, verbose=True):
+    model = model.to(device)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    if batch_size is None:
+        batch_size = train_X.shape[0]
+    if verbose:
+        print("num batches", train_X.shape[0] // batch_size)
+    train_losses = []
+    dev_losses = []
+    train_loss = model(train_X, train_Y)
+    dev_loss = model(dev_X, dev_Y)
+    if verbose:
+        print(f"Init, Train Loss: {train_loss.item():.4f}, Dev Loss: {dev_loss.item():.4f}")
+    train_losses.append(train_loss.item())
+    dev_losses.append(dev_loss.item())
+
+    for step in range(num_steps):
+        # run mini-batch training
+        for i in range(0, train_X.shape[0], batch_size):
+            batch_X = train_X[i:i+batch_size, :]
+            batch_Y = train_Y[i:i+batch_size, :]
+            loss = model(batch_X, batch_Y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        if step % 100 == 0:
+            train_loss = model(train_X, train_Y)
+            dev_loss = model(dev_X, dev_Y)
+            train_losses.append(train_loss.item())
+            dev_losses.append(dev_loss.item())
+
+            if verbose:
+                print(f"Step {step}, Train Loss: {train_loss.item():.4f}, Dev Loss: {dev_loss.item():.4f}")
+    return model, train_losses, dev_losses

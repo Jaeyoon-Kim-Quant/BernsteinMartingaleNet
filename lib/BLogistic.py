@@ -65,6 +65,17 @@ class BLogistic:
         bernstein_poly = u_p * u_m * self.comb
         poly = torch.sum(bernstein_poly * normalized_coeffs, dim=-1).reshape(-1, 1)
         return poly * torch.exp(-shifted_xs) / (1 + torch.exp(-shifted_xs)) ** 2 / scale
+
+    def naive_logpdf(self, xs, coeffs, raw_scale):
+        shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
+        powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
+        reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
+        u_p = torch.pow(Fx, powers.reshape(1, -1))
+        u_m = torch.pow(1 - Fx, reversed_powers.reshape(1, -1))
+        bernstein_poly = u_p * u_m * self.comb
+        poly = torch.sum(bernstein_poly * normalized_coeffs, dim=-1).reshape(-1, 1)
+        log_fprime = - shifted_xs - 2 * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
+        return torch.log(poly) + log_fprime
     
     def pdf(self, xs, coeffs, raw_scale):
         return torch.exp(self.logpdf(xs, coeffs, raw_scale))
