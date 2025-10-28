@@ -32,5 +32,9 @@ for i in range(degree + 1):
     vectorized_pdf = torch.exp(model.logpdf(test_xs.reshape(-1, 1), params.reshape(1, -1), scale))
     mean_vectorized = (test_xs @ vectorized_pdf).item() * torch.diff(test_xs).mean().item()
     assert abs(mean - mean_vectorized) < eps
+    integral = pdf.sum().item() * torch.diff(test_xs).mean().item()
+    assert abs(integral - 1.0) < eps
+    naive_pdf = model.naive_pdf(test_xs, params, scale)
+    assert abs(naive_pdf - pdf).max() < eps
 
 print("All tests passed")

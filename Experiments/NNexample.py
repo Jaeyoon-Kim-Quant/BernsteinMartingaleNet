@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib.utils import get_sequence_data
+from lib.utils import get_sequence_data, train_model
 from lib.BLogistic import BLogistic, train_blogistic, SplineLogistic, train_spline_logistic
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -42,31 +42,19 @@ print("train_X", train_X.shape, "train_Y", train_Y.shape, "dev_X", dev_X.shape, 
 print("std", std, train_X.std())
 
 class SimpleNN(nn.Module):
-    def __init__(self):
+    def __init__(self, context_window=context_window, dof=dof, use_naive_pdf = False):
         super(SimpleNN, self).__init__()
         self.fc1 = nn.Linear(context_window, context_window)
         self.fc2 = nn.Linear(context_window, dof)
-        with torch.no_grad():
-            self.fc1.weight *= 0.01
-            self.fc2.weight *= 0.01
-            self.fc1.bias *= 0
-            self.fc2.bias *= 0
+        self.use_naive_pdf = use_naive_pdf
         self.blogistic = BLogistic(dof - 2, device=device)
 
     def forward(self, x, y):
-        layer1 = torch.relu(self.fc1(x))
-        params = self.fc2(layer1)
-        return -self.blogistic.logpdf(y.reshape(-1, 1), params[:, :-1], params[:, -1]).mean()
-     
-    def print_nan_params(self, x, y):
-        layer1 = torch.relu(self.fc1(x))
-        params = self.fc2(layer1)
-        where_nan = params.isnan().any(dim=1)
-        print("where_nan", where_nan.shape)
-        if where_nan.any():
-            print("params", params[where_nan, :-2])
-            print("params", params[where_nan, -2])
-            print("params", params[where_nan, -1])
+        params = self.get_params(x)
+        if self.use_naive_pdf:
+            return -self.blogistic.naive_logpdf(y, params[:, :-1], params[:, -1]).mean()
+        else:
+            return -self.blogistic.logpdf(y, params[:, :-1], params[:, -1]).mean()
 
     def get_params(self, x):
         layer1 = torch.relu(self.fc1(x))
@@ -79,43 +67,27 @@ class SimpleNN(nn.Module):
 
     def get_pdf(self, x, sample_xs):
         return torch.exp(self.get_logpdf(x, sample_xs))
-
-def train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device: torch.device = None, transfer_learn = True):
-    model = SimpleNN().to(device)
-    if transfer_learn:
-        iid_train_steps = 300
-        iid_lr = 0.05
-        _, offset = train_blogistic(train_Y, dof, iid_lr, iid_train_steps, device=device)
+    
+    def transfer_learn(self, offset):
         with torch.no_grad():
-            model.fc2.bias[:-1].copy_(offset[0])
-            model.fc2.bias[-1].copy_(offset[1])
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-    batch_size = train_X.shape[0]
-    print("num batches", train_X.shape[0] // batch_size)
-    train_losses = []
-    dev_losses = []
-    for step in range(num_steps):
-        # run mini-batch training
-        for i in range(0, train_X.shape[0], batch_size):
-            batch_X = train_X[i:i+batch_size, :]
-            batch_Y = train_Y[i:i+batch_size, :]
-            loss = model(batch_X, batch_Y)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            self.fc2.bias[:-1].copy_(offset[0])
+            self.fc2.bias[-1].copy_(offset[1])
 
-        if step % 100 == 0:
-            train_loss = model(train_X, train_Y)
-            dev_loss = model(dev_X, dev_Y)
-            train_losses.append(train_loss.item())
-            dev_losses.append(dev_loss.item())
+lr = 0.1
+weight_decay = 0.0
+num_steps = 1000
+use_naive_pdf = False
+transfer_learn = False
 
-            print(f"Step {step}, Train Loss: {train_loss.item():.4f}, Dev Loss: {dev_loss.item():.4f}")
-    return model, train_losses, dev_losses
+torch.manual_seed(0)
+model = SimpleNN(use_naive_pdf=use_naive_pdf).to(device)
+if transfer_learn:
+    iid_train_steps = 300
+    iid_lr = 0.05
+    _, offset = train_blogistic(train_Y, dof, iid_lr, iid_train_steps, device=device)
+    model.transfer_learn(offset)
 
-lr = 1e-3
-num_steps = 3000
-model, train_losses, dev_losses = train_simple_nn(train_X, train_Y, dev_X, dev_Y, lr, num_steps, device=device)
+model, train_losses, dev_losses = train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay, num_steps, device=device)
 torch.save(model.state_dict(), "simple_nn_model_spline16_context10.pth")
 model = SimpleNN().to(device)
 model.load_state_dict(torch.load("simple_nn_model_spline16_context10.pth"))
@@ -129,8 +101,6 @@ for idx in range(nplots):
     pdf = model.get_pdf(dev_X[idx, :].reshape(1, -1), plot_xs)
     plt.plot(plot_xs.cpu().numpy(), pdf.detach().cpu().numpy(), color=color)
     plt.scatter(dev_Y[idx, :].cpu().numpy(), model.get_pdf(dev_X[idx, :].reshape(1, -1), dev_Y[idx, :].reshape(1, 1)).detach().cpu().numpy(), color=color)
-    mean = (plot_xs @ pdf).item() * torch.diff(plot_xs).mean().item()
-    print("mean", mean)
 
 plt.xlabel("Return")
 plt.ylabel("PDF")
