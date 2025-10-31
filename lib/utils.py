@@ -46,14 +46,11 @@ def is_full_nyse_day(date):
     return (close_time - open_time) >= full_length
 
 def get_sequence_data(folder_path, context_window, force_recompute=False):
-
     output_file_name = os.path.join(folder_path, f"spy_1min_data_context_{context_window}.npz")
     if os.path.exists(output_file_name) and not force_recompute:
         print("using cached data from", output_file_name)
         return np.load(output_file_name)["xs"], np.load(output_file_name)["ys"]
-
     files = glob.glob(os.path.join(folder_path, "spy_1min_*.csv"))
-
     xs = []
     ys = []
     for file in files:

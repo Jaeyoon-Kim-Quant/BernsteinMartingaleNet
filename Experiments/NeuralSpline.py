@@ -10,7 +10,6 @@ from lib.BLogistic import get_ppf, train_blogistic
 from lib.utils import load_data
 import pickle
 # Set device (GPU if available, otherwise CPU)
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 xs = load_data("../MarketData/spy_historical_data_20250929.csv")
 xs_torch = torch.tensor(xs, device=device)
