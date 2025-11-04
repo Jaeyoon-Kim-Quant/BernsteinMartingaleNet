@@ -12,10 +12,11 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sympy import EulerGamma
 from scipy.special import comb
+from lib.DistHead import DistHead
 DT = torch.float64
 torch.set_default_dtype(DT)
 
-class BLogistic:
+class BLogistic(DistHead):
     """
     Bernstein Logistic distribution class that uses the Bernstein polynomial to perterb the logistic distribution.
     """
@@ -26,6 +27,9 @@ class BLogistic:
         self.comb = torch.tensor([comb(self.degree, i) for i in range(self.degree + 1)], dtype=DT, device=self.device).reshape(1, -1)
         self.mus = torch.tensor(self.get_mus(), dtype=DT, device=self.device)
     
+    def num_params(self):
+        return self.degree + 2
+
     def get_mus(self):
         harmonic_numbers = np.cumsum(1 / np.arange(1, self.degree+1))
         harmonic_numbers = np.concatenate([[0], harmonic_numbers])
