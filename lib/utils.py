@@ -123,9 +123,9 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
                 params = model.get_params(batch_X)
                 # Compute individual losses (negative logpdf) without taking mean
                 if use_naive_pdf:
-                    individual_losses = -model.blogistic.naive_logpdf(batch_Y, params[:, :-1], params[:, -1])
+                    individual_losses = -model.blogistic.naive_logpdf(batch_Y, params)
                 else:
-                    individual_losses = -model.blogistic.logpdf(batch_Y, params[:, :-1], params[:, -1])
+                    individual_losses = -model.blogistic.logpdf(batch_Y, params)
                 all_losses.append(individual_losses.cpu())
             # Concatenate all individual losses
             all_losses = torch.cat(all_losses, dim=0)

@@ -24,17 +24,18 @@ cdf = 1.0 / (1.0 + torch.exp(-test_xs))
 
 eps = 1e-5
 for i in range(degree + 1):
-    params = np.ones(degree + 1) * -1e5
+    params = np.ones(degree + 2) * -1e5
     params[i] = 1e5
     params = torch.tensor(params, device=device)
-    pdf = model.pdf(test_xs, params, scale)
+    params[-1] = scale
+    pdf = model.pdf(test_xs, params)
     mean = (test_xs @ pdf).item() * torch.diff(test_xs).mean().item()
-    vectorized_pdf = torch.exp(model.logpdf(test_xs.reshape(-1, 1), params.reshape(1, -1), scale))
+    vectorized_pdf = torch.exp(model.logpdf(test_xs.reshape(-1, 1), params.reshape(1, -1)))
     mean_vectorized = (test_xs @ vectorized_pdf).item() * torch.diff(test_xs).mean().item()
     assert abs(mean - mean_vectorized) < eps
     integral = pdf.sum().item() * torch.diff(test_xs).mean().item()
     assert abs(integral - 1.0) < eps
-    naive_pdf = model.naive_pdf(test_xs, params, scale)
+    naive_pdf = model.naive_pdf(test_xs, params)
     assert abs(naive_pdf - pdf).max() < eps
 
 print("All tests passed")
