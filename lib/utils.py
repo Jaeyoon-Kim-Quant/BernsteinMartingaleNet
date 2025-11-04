@@ -94,29 +94,75 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
         print("num batches", train_X.shape[0] // batch_size)
     train_losses = []
     dev_losses = []
-    train_loss = model(train_X, train_Y)
-    dev_loss = model(dev_X, dev_Y)
+    
+    # Helper function to compute loss in batches
+    def compute_loss_batched(X, Y, batch_size):
+        model.eval()
+        with torch.no_grad():
+            total_loss = 0.0
+            num_samples = 0
+            for i in range(0, X.shape[0], batch_size):
+                batch_X = X[i:i+batch_size, :]
+                batch_Y = Y[i:i+batch_size, :]
+                batch_loss = model(batch_X, batch_Y)
+                batch_size_actual = batch_X.shape[0]
+                total_loss += batch_loss.item() * batch_size_actual
+                num_samples += batch_size_actual
+            return total_loss / num_samples if num_samples > 0 else 0.0
+    
+    # Helper function to compute individual losses and their std
+    def compute_loss_std(X, Y, batch_size):
+        model.eval()
+        with torch.no_grad():
+            all_losses = []
+            use_naive_pdf = getattr(model, 'use_naive_pdf', False)
+            for i in range(0, X.shape[0], batch_size):
+                batch_X = X[i:i+batch_size, :]
+                batch_Y = Y[i:i+batch_size, :]
+                # Get parameters for the batch
+                params = model.get_params(batch_X)
+                # Compute individual losses (negative logpdf) without taking mean
+                if use_naive_pdf:
+                    individual_losses = -model.blogistic.naive_logpdf(batch_Y, params[:, :-1], params[:, -1])
+                else:
+                    individual_losses = -model.blogistic.logpdf(batch_Y, params[:, :-1], params[:, -1])
+                all_losses.append(individual_losses.cpu())
+            # Concatenate all individual losses
+            all_losses = torch.cat(all_losses, dim=0)
+            # Calculate standard deviation
+            loss_std = torch.std(all_losses).item()
+            return loss_std
+    
+    train_loss = compute_loss_batched(train_X, train_Y, batch_size)
+    dev_loss = compute_loss_batched(dev_X, dev_Y, batch_size)
+    dev_loss_std = compute_loss_std(dev_X, dev_Y, batch_size) / np.sqrt(dev_X.shape[0])
     if verbose:
-        print(f"Init, Train Loss: {train_loss.item():.4f}, Dev Loss: {dev_loss.item():.4f}")
-    train_losses.append(train_loss.item())
-    dev_losses.append(dev_loss.item())
+        print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}")
+    train_losses.append(train_loss)
+    dev_losses.append(dev_loss)
 
     for step in range(num_steps):
+        model.train()
         # run mini-batch training
+        total_loss = 0.0
         for i in range(0, train_X.shape[0], batch_size):
             batch_X = train_X[i:i+batch_size, :]
             batch_Y = train_Y[i:i+batch_size, :]
             loss = model(batch_X, batch_Y)
+            total_loss += loss.item() * batch_X.shape[0]
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+        
+        #print(f"Step {step}, Total Loss: {total_loss / train_X.shape[0]:.4f}")
 
-        if step % 100 == 0:
-            train_loss = model(train_X, train_Y)
-            dev_loss = model(dev_X, dev_Y)
-            train_losses.append(train_loss.item())
-            dev_losses.append(dev_loss.item())
+        if step % 10 == 0:
+            train_loss = compute_loss_batched(train_X, train_Y, batch_size)
+            dev_loss = compute_loss_batched(dev_X, dev_Y, batch_size)
+            dev_loss_std = compute_loss_std(dev_X, dev_Y, batch_size) / np.sqrt(dev_X.shape[0])
+            train_losses.append(train_loss)
+            dev_losses.append(dev_loss)
 
             if verbose:
-                print(f"Step {step}, Train Loss: {train_loss.item():.4f}, Dev Loss: {dev_loss.item():.4f}")
+                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}")
     return model, train_losses, dev_losses
