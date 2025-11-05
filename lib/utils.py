@@ -85,7 +85,7 @@ def get_sequence_data(folder_path, context_window, force_recompute=False):
     np.savez(output_file_name, xs=np.array(xs), ys=np.array(ys))
     return np.array(xs), np.array(ys)
 
-def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, num_steps=1000, batch_size=None, device: torch.device = None, verbose=True):
+def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, num_steps=1000, batch_size=None, device: torch.device = None, verbose=True, output_folder=None):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     if batch_size is None:
@@ -94,7 +94,7 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
         print("num batches", train_X.shape[0] // batch_size)
     train_losses = []
     dev_losses = []
-    
+    loss_steps = []
     # Helper function to compute loss in batches
     def compute_loss_batched(X, Y, batch_size):
         model.eval()
@@ -111,7 +111,7 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
             return total_loss / num_samples if num_samples > 0 else 0.0
     
     # Helper function to compute individual losses and their std
-    def compute_loss_std(X, Y, batch_size):
+    def eval_loss(X, Y, batch_size):
         model.eval()
         with torch.no_grad():
             all_losses = []
@@ -122,24 +122,22 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
                 # Get parameters for the batch
                 params = model.get_params(batch_X)
                 # Compute individual losses (negative logpdf) without taking mean
-                if use_naive_pdf:
-                    individual_losses = -model.blogistic.naive_logpdf(batch_Y, params[:, :-1], params[:, -1])
-                else:
-                    individual_losses = -model.blogistic.logpdf(batch_Y, params[:, :-1], params[:, -1])
+                individual_losses = -model.dist_head.logpdf(batch_Y, params)
                 all_losses.append(individual_losses.cpu())
             # Concatenate all individual losses
             all_losses = torch.cat(all_losses, dim=0)
             # Calculate standard deviation
             loss_std = torch.std(all_losses).item()
-            return loss_std
+            loss_mean = torch.mean(all_losses).item()
+            return loss_mean, loss_std * np.sqrt(1 / X.shape[0])
     
-    train_loss = compute_loss_batched(train_X, train_Y, batch_size)
-    dev_loss = compute_loss_batched(dev_X, dev_Y, batch_size)
-    dev_loss_std = compute_loss_std(dev_X, dev_Y, batch_size) / np.sqrt(dev_X.shape[0])
+    train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
+    dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
     if verbose:
         print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}")
-    train_losses.append(train_loss)
-    dev_losses.append(dev_loss)
+
+    if output_folder is not None:
+        os.makedirs(output_folder, exist_ok=True)
 
     for step in range(num_steps):
         model.train()
@@ -157,12 +155,18 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
         #print(f"Step {step}, Total Loss: {total_loss / train_X.shape[0]:.4f}")
 
         if step % 10 == 0:
-            train_loss = compute_loss_batched(train_X, train_Y, batch_size)
-            dev_loss = compute_loss_batched(dev_X, dev_Y, batch_size)
-            dev_loss_std = compute_loss_std(dev_X, dev_Y, batch_size) / np.sqrt(dev_X.shape[0])
+            train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
+            dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
             train_losses.append(train_loss)
             dev_losses.append(dev_loss)
+            loss_steps.append(step)
+            if output_folder is not None:
+                # save model
+                torch.save(model.state_dict(), os.path.join(output_folder, f"model_{step}.pth"))
 
             if verbose:
                 print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}")
+    # save losses to csv
+    df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
+    df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
     return model, train_losses, dev_losses

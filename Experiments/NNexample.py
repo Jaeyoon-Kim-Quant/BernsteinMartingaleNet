@@ -52,9 +52,9 @@ class SimpleNN(nn.Module):
     def forward(self, x, y):
         params = self.get_params(x)
         if self.use_naive_pdf:
-            return -self.blogistic.naive_logpdf(y, params[:, :-1], params[:, -1]).mean()
+            return -self.blogistic.naive_logpdf(y, params).mean()
         else:
-            return -self.blogistic.logpdf(y, params[:, :-1], params[:, -1]).mean()
+            return -self.blogistic.logpdf(y, params).mean()
 
     def get_params(self, x):
         layer1 = torch.relu(self.fc1(x))
@@ -63,7 +63,7 @@ class SimpleNN(nn.Module):
     
     def get_logpdf(self, x, sample_xs):
         params = self.get_params(x)
-        return self.blogistic.logpdf(sample_xs, params[:, :-1].reshape(1, -1), params[:, -1])
+        return self.blogistic.logpdf(sample_xs, params.reshape(1, -1))
 
     def get_pdf(self, x, sample_xs):
         return torch.exp(self.get_logpdf(x, sample_xs))
@@ -91,9 +91,9 @@ class LSTMNN(nn.Module):
     def forward(self, x, y):
         params = self.get_params(x)
         if self.use_naive_pdf:
-            return -self.blogistic.naive_logpdf(y, params[:, :-1], params[:, -1]).mean()
+            return -self.blogistic.naive_logpdf(y, params).mean()
         else:
-            return -self.blogistic.logpdf(y, params[:, :-1], params[:, -1]).mean()
+            return -self.blogistic.logpdf(y, params).mean()
 
     def get_params(self, x):
         # x shape: (batch, context_window)
@@ -110,22 +110,21 @@ class LSTMNN(nn.Module):
     
     def get_logpdf(self, x, sample_xs):
         params = self.get_params(x)
-        return self.blogistic.logpdf(sample_xs, params[:, :-1].reshape(1, -1), params[:, -1])
+        return self.blogistic.logpdf(sample_xs, params.reshape(1, -1))
 
     def get_pdf(self, x, sample_xs):
         return torch.exp(self.get_logpdf(x, sample_xs))
 
     def transfer_learn(self, offset):
         with torch.no_grad():
-            self.fc2.bias[:-1].copy_(offset[0])
-            self.fc2.bias[-1].copy_(offset[1])
+            self.fc2.bias.copy_(offset)
 
 lr = 0.1
 weight_decay = 0.0
-num_steps = 1000
+num_steps = 1
 use_naive_pdf = False
 transfer_learn = True
-batch_size = 2 ** 13#512 * 16 * 4
+batch_size = 2 ** 10#512 * 16 * 4
 
 torch.manual_seed(42)
 #model = SimpleNN(use_naive_pdf=use_naive_pdf).to(device)
@@ -137,9 +136,8 @@ if transfer_learn:
     model.transfer_learn(offset)
 
 model, train_losses, dev_losses = train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay, num_steps, batch_size=batch_size, device=device)
-torch.save(model.state_dict(), "simple_nn_model_spline16_context10.pth")
-model = SimpleNN().to(device)
-model.load_state_dict(torch.load("simple_nn_model_spline16_context10.pth"))
+torch.save(model.state_dict(), "simple_model.pth")
+model.load_state_dict(torch.load("simple_model.pth"))
 
 plot_xs = torch.linspace(-20, 20, 100000, device=device)
 nplots = 10

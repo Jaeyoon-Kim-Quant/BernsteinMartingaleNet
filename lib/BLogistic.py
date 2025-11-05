@@ -12,10 +12,11 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sympy import EulerGamma
 from scipy.special import comb
+from lib.DistHead import DistHead
 DT = torch.float64
 torch.set_default_dtype(DT)
 
-class BLogistic:
+class BLogistic(DistHead):
     """
     Bernstein Logistic distribution class that uses the Bernstein polynomial to perterb the logistic distribution.
     """
@@ -26,6 +27,9 @@ class BLogistic:
         self.comb = torch.tensor([comb(self.degree, i) for i in range(self.degree + 1)], dtype=DT, device=self.device).reshape(1, -1)
         self.mus = torch.tensor(self.get_mus(), dtype=DT, device=self.device)
     
+    def num_params(self):
+        return self.degree + 2
+
     def get_mus(self):
         harmonic_numbers = np.cumsum(1 / np.arange(1, self.degree+1))
         harmonic_numbers = np.concatenate([[0], harmonic_numbers])
@@ -43,8 +47,19 @@ class BLogistic:
         shifted_xs = xs.reshape(-1, 1) / scale + mean.reshape(-1, 1)
         Fx = (1.0 + torch.exp(-shifted_xs)) ** -1
         return shifted_xs, normalized_coeffs, Fx, scale
+    
+    def _split_combined_coeffs(self, combined_coeffs):
+        if combined_coeffs.ndim == 2:
+            coeffs = combined_coeffs[:, :-1]
+            raw_scale = combined_coeffs[:, -1]
+        else:
+            coeffs = combined_coeffs[:-1]
+            raw_scale = combined_coeffs[-1]
+        return coeffs, raw_scale
 
-    def logpdf(self, xs, coeffs, raw_scale):
+    def logpdf(self, xs, combined_coeffs):
+        coeffs, raw_scale = self._split_combined_coeffs(combined_coeffs)
+
         shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
         reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
@@ -56,7 +71,8 @@ class BLogistic:
         log_poly = torch.logsumexp(coeffs + log_bernstein_poly, dim=-1).reshape(-1, 1) - torch.logsumexp(coeffs, dim=-1).reshape(-1, 1) + torch.log(torch.tensor(self.degree + 1, dtype=DT, device=self.device))
         return log_poly + log_fprime
 
-    def naive_pdf(self, xs, coeffs, raw_scale):
+    def naive_pdf(self, xs, combined_coeffs):
+        coeffs, raw_scale = self._split_combined_coeffs(combined_coeffs)
         shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
         reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
@@ -64,9 +80,10 @@ class BLogistic:
         u_m = torch.pow(1 - Fx, reversed_powers.reshape(1, -1))
         bernstein_poly = u_p * u_m * self.comb
         poly = torch.sum(bernstein_poly * normalized_coeffs, dim=-1).reshape(-1, 1)
-        return poly * torch.log(torch.exp(-shifted_xs) / (1 + torch.exp(-shifted_xs)) ** 2 / scale)
+        return poly * torch.exp(-shifted_xs) / (1 + torch.exp(-shifted_xs)) ** 2 / scale
 
-    def naive_logpdf(self, xs, coeffs, raw_scale):
+    def naive_logpdf(self, xs, combined_coeffs):
+        coeffs, raw_scale = self._split_combined_coeffs(combined_coeffs)
         shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
         reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
@@ -77,10 +94,10 @@ class BLogistic:
         log_fprime = - shifted_xs - 2 * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
         return torch.log(poly) + log_fprime
     
-    def pdf(self, xs, coeffs, raw_scale):
-        return torch.exp(self.logpdf(xs, coeffs, raw_scale))
+    def pdf(self, xs, combined_coeffs):
+        return torch.exp(self.logpdf(xs, combined_coeffs))
 
-    def cdf(self, xs, coeffs, raw_scale):
+    def cdf(self, xs, combined_coeffs):
         raise NotImplementedError("CDF not implemented for BLogistic")
 
 def get_ppf(blogistic, params, ps, max_scale=20, num_steps=100):
@@ -107,12 +124,12 @@ def get_ppf(blogistic, params, ps, max_scale=20, num_steps=100):
 def train_blogistic(xs, dof, lr, num_steps, device: torch.device = None):
     degree = dof - 2
     blogistic = BLogistic(degree=degree, device=device)
-    scale_param = torch.nn.Parameter(torch.tensor(0.0, device=device))
-    raw_coeffs = torch.nn.Parameter(torch.randn(degree + 1, device=device))
-    params = [raw_coeffs, scale_param]
+    param = torch.randn(degree + 2, device=device)
+    param[-1] = 0
+    param = torch.nn.Parameter(param)
     
-    nll = lambda xs_batch: -torch.mean(blogistic.logpdf(xs_batch, *params))
-    optimizer = torch.optim.Adam(params, lr=lr)
+    nll = lambda xs_batch: -torch.mean(blogistic.logpdf(xs_batch, param))
+    optimizer = torch.optim.Adam([param], lr=lr)
 
     for step in range(1, num_steps + 1):
         optimizer.zero_grad()
@@ -124,7 +141,7 @@ def train_blogistic(xs, dof, lr, num_steps, device: torch.device = None):
 
     print(f"Step {step}, Final Loss: {loss.item():.4f}")
     
-    return blogistic, params
+    return blogistic, param
 
 def open_uniform_knots(nbasis: int, degree: int = 3, *, device=None, dtype=None):
     """
