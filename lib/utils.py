@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
+import json
 
 def load_data(file_path):
     df = pd.read_csv(file_path)
@@ -85,9 +85,102 @@ def get_sequence_data(folder_path, context_window, force_recompute=False):
     np.savez(output_file_name, xs=np.array(xs), ys=np.array(ys))
     return np.array(xs), np.array(ys)
 
-def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, num_steps=1000, batch_size=None, device: torch.device = None, verbose=True, output_folder=None):
+def get_sequence_data_by_month(folder_path, context_window, num_dev_months, num_test_months, force_recompute=False):
+    output_file_name = os.path.join(folder_path, f"spy_1min_data_context_{context_window}_by_month.npz")
+    if os.path.exists(output_file_name) and not force_recompute:
+        print("using cached data from", output_file_name)
+        f = np.load(output_file_name)
+        train_xs = f["train_xs"]
+        train_ys = f["train_ys"]
+        dev_xs = f["dev_xs"]
+        dev_ys = f["dev_ys"]
+        test_xs = f["test_xs"]
+        test_ys = f["test_ys"]
+        return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
+    files = glob.glob(os.path.join(folder_path, "spy_1min_*.csv"))
+    xs = {}
+    ys = {}
+    months = set()
+    for file in files:
+        date_str = file.split("_")[-1].split(".")[0]
+        date_str = date_str[:4] + "-" + date_str[4:6] + "-" + date_str[6:]
+        if not is_full_nyse_day(date_str):
+            print("skipping", date_str)
+            continue
+
+        month = date_str[:7]
+        df = pd.read_csv(file)
+
+        open_time = datetime.datetime.strptime(date_str + " 09:30:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo= ZoneInfo("America/New_York"))
+        close_time = datetime.datetime.strptime(date_str + " 16:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo= ZoneInfo("America/New_York"))
+        df["ts_recv"] = pd.to_datetime(df["ts_recv"])
+        df['ts_recv_est'] = df['ts_recv'].dt.tz_convert('America/New_York')
+        df = df[(df["ts_recv_est"] >= open_time) & (df["ts_recv_est"] <= close_time)]
+        df["seconds_since_open"] = (df["ts_recv_est"] - open_time).dt.total_seconds()
+
+        data = df[["ret_60s", "rv_60s", "seconds_since_open"]].values
+        # Create rolling windows for xs
+        if data.shape[0] <= context_window:
+            continue
+        strides = np.array([data[i-context_window:i, :] for i in range(context_window, data.shape[0])])
+        y_vec = data[context_window:, 0]
+        if np.isnan(strides).any():
+            print("nan in strides", date_str)
+            continue
+        if month not in xs:
+            xs[month] = []
+            ys[month] = []
+            months.add(month)
+        xs[month].extend(strides)
+        ys[month].extend(y_vec)
+    
+    np.random.seed(0)
+    months = np.random.permutation(list(months))
+    dev_months = months[:num_dev_months]
+    test_months = months[num_dev_months:num_dev_months + num_test_months]
+    train_months = months[num_dev_months + num_test_months:]
+    print("train months", train_months)
+    print("dev months", dev_months)
+    print("test months", test_months)
+    print("num months", len(train_months), len(dev_months), len(test_months))
+
+    def combine_data(months):
+        xs_combined = []
+        ys_combined = []
+        for month in months:
+            xs_combined.extend(xs[month])
+            ys_combined.extend(ys[month])
+        return np.array(xs_combined), np.array(ys_combined)
+
+    train_xs, train_ys = combine_data(train_months)
+    dev_xs, dev_ys = combine_data(dev_months)
+    test_xs, test_ys = combine_data(test_months)
+
+    np.savez(output_file_name, train_xs=train_xs, train_ys=train_ys, dev_xs=dev_xs, dev_ys=dev_ys, test_xs=test_xs, test_ys=test_ys)
+    return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
+
+
+def train_model(
+    model, 
+    train_X, 
+    train_Y, 
+    dev_X, 
+    dev_Y, 
+    lr, 
+    weight_decay=1e-4, 
+    num_steps=1000, 
+    batch_size=None, 
+    device: torch.device = None, 
+    verbose=True, 
+    output_folder=None,
+    lr_decay_step=200,    # every N steps to decay learning rate
+    lr_decay_gamma=0.5,   # decay factor
+):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    # Add learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_decay_step, gamma=lr_decay_gamma)
+
     if batch_size is None:
         batch_size = train_X.shape[0]
     if verbose:
@@ -109,7 +202,7 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
                 total_loss += batch_loss.item() * batch_size_actual
                 num_samples += batch_size_actual
             return total_loss / num_samples if num_samples > 0 else 0.0
-    
+
     # Helper function to compute individual losses and their std
     def eval_loss(X, Y, batch_size):
         model.eval()
@@ -130,7 +223,7 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
             loss_std = torch.std(all_losses).item()
             loss_mean = torch.mean(all_losses).item()
             return loss_mean, loss_std * np.sqrt(1 / X.shape[0])
-    
+
     train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
     dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
     if verbose:
@@ -151,7 +244,10 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        
+
+        # Step learning rate decay after each step
+        scheduler.step()
+
         #print(f"Step {step}, Total Loss: {total_loss / train_X.shape[0]:.4f}")
 
         if step % 10 == 0:
@@ -165,8 +261,12 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
                 torch.save(model.state_dict(), os.path.join(output_folder, f"model_{step}.pth"))
 
             if verbose:
-                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}")
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}, LR: {current_lr:.6f}")
     # save losses to csv
     df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
     df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
+    # save hyperparameters to json
+    with open(os.path.join(output_folder, "hyperparameters.json"), "w") as f:
+        json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size, "lr_decay_step": lr_decay_step, "lr_decay_gamma": lr_decay_gamma}, f)
     return model, train_losses, dev_losses
