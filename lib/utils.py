@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
+import json
 
 def load_data(file_path):
     df = pd.read_csv(file_path)
@@ -84,6 +84,81 @@ def get_sequence_data(folder_path, context_window, force_recompute=False):
         ys.extend(y_vec)
     np.savez(output_file_name, xs=np.array(xs), ys=np.array(ys))
     return np.array(xs), np.array(ys)
+
+def get_sequence_data_by_month(folder_path, context_window, num_dev_months, num_test_months, force_recompute=False):
+    output_file_name = os.path.join(folder_path, f"spy_1min_data_context_{context_window}_by_month.npz")
+    if os.path.exists(output_file_name) and not force_recompute:
+        print("using cached data from", output_file_name)
+        f = np.load(output_file_name)
+        train_xs = f["train_xs"]
+        train_ys = f["train_ys"]
+        dev_xs = f["dev_xs"]
+        dev_ys = f["dev_ys"]
+        test_xs = f["test_xs"]
+        test_ys = f["test_ys"]
+        return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
+    files = glob.glob(os.path.join(folder_path, "spy_1min_*.csv"))
+    xs = {}
+    ys = {}
+    months = set()
+    for file in files:
+        date_str = file.split("_")[-1].split(".")[0]
+        date_str = date_str[:4] + "-" + date_str[4:6] + "-" + date_str[6:]
+        if not is_full_nyse_day(date_str):
+            print("skipping", date_str)
+            continue
+
+        month = date_str[:7]
+        df = pd.read_csv(file)
+
+        open_time = datetime.datetime.strptime(date_str + " 09:30:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo= ZoneInfo("America/New_York"))
+        close_time = datetime.datetime.strptime(date_str + " 16:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo= ZoneInfo("America/New_York"))
+        df["ts_recv"] = pd.to_datetime(df["ts_recv"])
+        df['ts_recv_est'] = df['ts_recv'].dt.tz_convert('America/New_York')
+        df = df[(df["ts_recv_est"] >= open_time) & (df["ts_recv_est"] <= close_time)]
+        df["seconds_since_open"] = (df["ts_recv_est"] - open_time).dt.total_seconds()
+
+        data = df[["ret_60s", "rv_60s", "seconds_since_open"]].values
+        # Create rolling windows for xs
+        if data.shape[0] <= context_window:
+            continue
+        strides = np.array([data[i-context_window:i, :] for i in range(context_window, data.shape[0])])
+        y_vec = data[context_window:, 0]
+        if np.isnan(strides).any():
+            print("nan in strides", date_str)
+            continue
+        if month not in xs:
+            xs[month] = []
+            ys[month] = []
+            months.add(month)
+        xs[month].extend(strides)
+        ys[month].extend(y_vec)
+    
+    np.random.seed(0)
+    months = np.random.permutation(list(months))
+    dev_months = months[:num_dev_months]
+    test_months = months[num_dev_months:num_dev_months + num_test_months]
+    train_months = months[num_dev_months + num_test_months:]
+    print("train months", train_months)
+    print("dev months", dev_months)
+    print("test months", test_months)
+    print("num months", len(train_months), len(dev_months), len(test_months))
+
+    def combine_data(months):
+        xs_combined = []
+        ys_combined = []
+        for month in months:
+            xs_combined.extend(xs[month])
+            ys_combined.extend(ys[month])
+        return np.array(xs_combined), np.array(ys_combined)
+
+    train_xs, train_ys = combine_data(train_months)
+    dev_xs, dev_ys = combine_data(dev_months)
+    test_xs, test_ys = combine_data(test_months)
+
+    np.savez(output_file_name, train_xs=train_xs, train_ys=train_ys, dev_xs=dev_xs, dev_ys=dev_ys, test_xs=test_xs, test_ys=test_ys)
+    return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
+
 
 def train_model(
     model, 
@@ -191,4 +266,7 @@ def train_model(
     # save losses to csv
     df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
     df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
+    # save hyperparameters to json
+    with open(os.path.join(output_folder, "hyperparameters.json"), "w") as f:
+        json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size, "lr_decay_step": lr_decay_step, "lr_decay_gamma": lr_decay_gamma}, f)
     return model, train_losses, dev_losses
