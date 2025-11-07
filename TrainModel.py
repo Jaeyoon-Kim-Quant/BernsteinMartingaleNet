@@ -66,8 +66,8 @@ test_ys = test_ys / std
 lr = 0.002
 decay_step = 50
 decay_gamma = 0.5
-weight_decay = 0
-num_steps = 1
+weight_decay = 0.002
+num_steps = 300
 batch_size = 512 * 8
 
 model = Michenkow(context_window, dist_head, device)
