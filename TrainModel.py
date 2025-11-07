@@ -40,6 +40,8 @@ elif args.dist_type == "StudentT":
 elif args.dist_type == "SkewedStudentT":
     dist_head = SkewedStudentTHead(device)
 elif args.dist_type == "BLogistic":
+    if args.dist_param == "":
+        raise ValueError("BLogistic dist type requires a degree parameter")
     dof = int(args.dist_param)
     dist_head = BLogistic(dof - 2, device)
 else:
