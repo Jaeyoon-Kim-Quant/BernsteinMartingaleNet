@@ -85,9 +85,27 @@ def get_sequence_data(folder_path, context_window, force_recompute=False):
     np.savez(output_file_name, xs=np.array(xs), ys=np.array(ys))
     return np.array(xs), np.array(ys)
 
-def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, num_steps=1000, batch_size=None, device: torch.device = None, verbose=True, output_folder=None):
+def train_model(
+    model, 
+    train_X, 
+    train_Y, 
+    dev_X, 
+    dev_Y, 
+    lr, 
+    weight_decay=1e-4, 
+    num_steps=1000, 
+    batch_size=None, 
+    device: torch.device = None, 
+    verbose=True, 
+    output_folder=None,
+    lr_decay_step=200,    # every N steps to decay learning rate
+    lr_decay_gamma=0.5,   # decay factor
+):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    # Add learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_decay_step, gamma=lr_decay_gamma)
+
     if batch_size is None:
         batch_size = train_X.shape[0]
     if verbose:
@@ -109,7 +127,7 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
                 total_loss += batch_loss.item() * batch_size_actual
                 num_samples += batch_size_actual
             return total_loss / num_samples if num_samples > 0 else 0.0
-    
+
     # Helper function to compute individual losses and their std
     def eval_loss(X, Y, batch_size):
         model.eval()
@@ -130,7 +148,7 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
             loss_std = torch.std(all_losses).item()
             loss_mean = torch.mean(all_losses).item()
             return loss_mean, loss_std * np.sqrt(1 / X.shape[0])
-    
+
     train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
     dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
     if verbose:
@@ -151,7 +169,10 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        
+
+        # Step learning rate decay after each step
+        scheduler.step()
+
         #print(f"Step {step}, Total Loss: {total_loss / train_X.shape[0]:.4f}")
 
         if step % 10 == 0:
@@ -165,7 +186,8 @@ def train_model(model, train_X, train_Y, dev_X, dev_Y, lr, weight_decay=1e-4, nu
                 torch.save(model.state_dict(), os.path.join(output_folder, f"model_{step}.pth"))
 
             if verbose:
-                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}")
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}, LR: {current_lr:.6f}")
     # save losses to csv
     df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
     df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
