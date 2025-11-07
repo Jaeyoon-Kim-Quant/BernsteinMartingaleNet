@@ -42,6 +42,8 @@ elif args.dist_type == "SkewedStudentT":
 elif args.dist_type == "BLogistic":
     dof = int(args.dist_param)
     dist_head = BLogistic(dof - 2, device)
+else:
+    raise ValueError(f"Invalid dist type: {args.dist_type}")
 
 folder_path = root + "/MarketData/historical_data"
 context_window = 60
@@ -67,7 +69,7 @@ lr = 0.002
 decay_step = 50
 decay_gamma = 0.5
 weight_decay = 0.002
-num_steps = 300
+num_steps = 1
 batch_size = 512 * 8
 
 model = Michenkow(context_window, dist_head, device)
