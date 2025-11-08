@@ -71,10 +71,10 @@ lr = 0.002
 decay_step = 50
 decay_gamma = 0.5
 weight_decay = 0.002
-num_steps = 300
+num_steps = 1
 batch_size = 512 * 8
 
 model = Michenkow(context_window, dist_head, device)
 
-model, train_losses, dev_losses = train_model(model, train_xs, train_ys, dev_xs, dev_ys,
+model, train_losses, dev_losses = train_model(model, train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys,
     lr, weight_decay, num_steps, batch_size=batch_size, device=device, output_folder=args.output_folder, lr_decay_step=decay_step, lr_decay_gamma=decay_gamma)
