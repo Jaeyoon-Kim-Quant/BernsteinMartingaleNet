@@ -166,6 +166,8 @@ def train_model(
     train_Y, 
     dev_X, 
     dev_Y, 
+    test_X, 
+    test_Y, 
     lr, 
     weight_decay=1e-4, 
     num_steps=1000, 
@@ -269,4 +271,20 @@ def train_model(
     # save hyperparameters to json
     with open(os.path.join(output_folder, "hyperparameters.json"), "w") as f:
         json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size, "lr_decay_step": lr_decay_step, "lr_decay_gamma": lr_decay_gamma}, f)
+    
+    # evaluate model on test data
+    final_train_loss, final_train_loss_std = eval_loss(train_X, train_Y, batch_size)
+    final_dev_loss, final_dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
+    test_loss, test_loss_std = eval_loss(test_X, test_Y, batch_size)
+    print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {final_train_loss - 2 * final_train_loss_std:.4f}, {final_train_loss + 2 * final_train_loss_std:.4f}")
+    print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {final_dev_loss - 2 * final_dev_loss_std:.4f}, {final_dev_loss + 2 * final_dev_loss_std:.4f}")
+    print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {test_loss - 2 * test_loss_std:.4f}, {test_loss + 2 * test_loss_std:.4f}")
+    # save final losses to csv
+    final_df = pd.DataFrame({"data_type": ["train", "dev", "test"], "loss": [final_train_loss, final_dev_loss, test_loss], "loss_std": [final_train_loss_std, final_dev_loss_std, test_loss_std]})
+    final_df.to_csv(os.path.join(output_folder, "final_losses.csv"), index=False)
+
+    if output_folder is not None:
+        # save model
+        torch.save(model.state_dict(), os.path.join(output_folder, f"final_model.pth"))
+
     return model, train_losses, dev_losses
