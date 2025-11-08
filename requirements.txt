@@ -1,0 +1,21 @@
+# Core dependencies
+torch>=2.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+scipy>=1.10.0
+exchange-calendars>=4.3.0
+mpmath>=1.3.0
+sympy>=1.12.0
+
+# Optional dependencies for market data processing
+polygon-api-client>=1.13.0
+tqdm>=4.65.0
+
+# Optional dependencies for experiments
+# Uncomment if needed:
+# databento>=0.16.0  # For compute_1min_return_and_save.ipynb
+# nflows>=0.14.0     # For Experiments/NeuralSpline.py
+# torchcubicspline>=0.1.0  # For Experiments/BasisComparison.py
+
+
