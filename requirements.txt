@@ -12,6 +12,9 @@ sympy>=1.12.0
 polygon-api-client>=1.13.0
 tqdm>=4.65.0
 
+# Testing dependencies
+pytest>=7.0.0
+
 # Optional dependencies for experiments
 # Uncomment if needed:
 # databento>=0.16.0  # For compute_1min_return_and_save.ipynb
