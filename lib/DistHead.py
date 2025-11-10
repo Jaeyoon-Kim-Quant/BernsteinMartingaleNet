@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import torch
 from torch.distributions import Normal, StudentT
+import numpy as np
 
 class DistHead:
     @abstractmethod
@@ -20,61 +21,54 @@ class NormalHead(DistHead):
         self.device = device if device is not None else torch.device('cpu')
     
     def _get_dist(self, params):
-        mean = torch.nn.functional.softplus(params[0])
-        std = torch.nn.functional.softplus(params[1])
-        return Normal(mean, std)
+        std = torch.nn.functional.softplus(params[:, 0]).reshape(-1, 1)
+        return Normal(0, std)
     
     def logpdf(self, xs, params):
         dist = self._get_dist(params)
         return dist.log_prob(xs)
     
     def pdf(self, xs, params):
-        dist = self._get_dist(params)
-        return dist.prob(xs)
+        return torch.exp(self.logpdf(xs, params))
     
     def num_params(self):
-        return 2
+        return 1
 
 class StudentTHead(DistHead):
     def __init__(self, device: torch.device = None):
         self.device = device if device is not None else torch.device('cpu')
     
     def _get_dist(self, params):
-        mean= torch.nn.functional.softplus(params[0])
-        std = torch.nn.functional.softplus(params[1])
-        df = torch.nn.functional.softplus(params[2])
-        return StudentT(df, mean, std)
+        std = torch.nn.functional.softplus(params[:, 0]).reshape(-1, 1)
+        df = torch.nn.functional.softplus(params[:, 1]).reshape(-1, 1) + 1 # ensures well defined mean
+        return StudentT(df, 0, std)
     
     def logpdf(self, xs, params):
         dist = self._get_dist(params)
         return dist.log_prob(xs)
     
     def pdf(self, xs, params):
-        dist = self._get_dist(params)
-        return dist.prob(xs)
+        return torch.exp(self.logpdf(xs, params))
     
     def num_params(self):
-        return 3
+        return 2
 
 class SkewedStudentTHead(DistHead):
     def __init__(self, device: torch.device = None):
         self.device = device if device is not None else torch.device('cpu')
     
     def _get_dist(self, params):
-        mean = torch.nn.functional.softplus(params[0])
-        std = torch.nn.functional.softplus(params[1])
-        df = torch.nn.functional.softplus(params[2])
-        skewness = torch.nn.functional.softplus(params[3])
-        return mean, std, df, skewness
+        std = torch.nn.functional.softplus(params[:, 0]).reshape(-1, 1)
+        df = 1 + torch.nn.functional.softplus(params[:, 1]).reshape(-1, 1) # ensures well defined mean
+        skewness = torch.nn.functional.softplus(params[:, 2]).reshape(-1, 1)
+        return std, df, skewness
     
     def logpdf(self, xs, params):
-        mean, std, df, skewness = self._get_dist(params)
-        #zs = (xs - mean) / std
-        #dist = StudentT(df, 0, 1)
-        #skew_mult = skewness ** -torch.sign(zs)
-        #return dist.logpdf(zs * skew_mult) + torch.log(2 / (skewness + skewness ** -1)) - torch.log(std)
-
-        z = (xs - mean) / std
+        std, df, skewness = self._get_dist(params)
+        mean_correction = (skewness ** 2 - skewness ** -2) * 2 * df
+        mean_correction /= (skewness + 1/skewness) * (df - 1) * torch.sqrt(torch.tensor(np.pi) * df)
+        mean_correction *= torch.exp(torch.lgamma((df + 1) / 2) - torch.lgamma(df / 2))
+        z = xs / std + mean_correction
 
         # Piecewise rescale: positive side uses 1/g, negative side uses g
         scale_mult = torch.where(z >= 0, 1.0 / skewness, skewness)
@@ -90,5 +84,5 @@ class SkewedStudentTHead(DistHead):
         return torch.exp(self.logpdf(xs, params))
     
     def num_params(self):
-        return 4
+        return 3
 
