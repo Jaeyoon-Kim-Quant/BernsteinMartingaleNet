@@ -159,6 +159,54 @@ def get_sequence_data_by_month(folder_path, context_window, num_dev_months, num_
     np.savez(output_file_name, train_xs=train_xs, train_ys=train_ys, dev_xs=dev_xs, dev_ys=dev_ys, test_xs=test_xs, test_ys=test_ys)
     return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
 
+def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recompute=False):
+    output_file_name = os.path.join(folder_path, f"spy_1min_full_context_by_day_frac_dev_{frac_dev:.3f}_frac_test_{frac_test:.3f}.npz")
+    if os.path.exists(output_file_name) and not force_recompute:
+        print("using cached data from", output_file_name)
+        f = np.load(output_file_name)
+        train = f["train"]
+        dev = f["dev"]
+        test = f["test"]
+        return train, dev, test
+    files = glob.glob(os.path.join(folder_path, "spy_1min_*.csv"))
+    xs = []
+    for file in files:
+        date_str = file.split("_")[-1].split(".")[0]
+        date_str = date_str[:4] + "-" + date_str[4:6] + "-" + date_str[6:]
+        if not is_full_nyse_day(date_str):
+            print("skipping", date_str)
+            continue
+
+        df = pd.read_csv(file)
+
+        open_time = datetime.datetime.strptime(date_str + " 09:30:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo= ZoneInfo("America/New_York"))
+        close_time = datetime.datetime.strptime(date_str + " 16:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo= ZoneInfo("America/New_York"))
+        df["ts_recv"] = pd.to_datetime(df["ts_recv"])
+        df['ts_recv_est'] = df['ts_recv'].dt.tz_convert('America/New_York')
+        df = df[(df["ts_recv_est"] >= open_time) & (df["ts_recv_est"] <= close_time)]
+        df["seconds_since_open"] = (df["ts_recv_est"] - open_time).dt.total_seconds()
+
+        data = df[["ret_60s", "rv_60s", "seconds_since_open"]].values
+        data = np.array(data)
+        xs.append(data)
+    
+    np.random.seed(0)
+    num_samples = len(xs)
+    num_dev = int(num_samples * frac_dev)
+    num_test = int(num_samples * frac_test)
+    indices = np.random.permutation(len(xs))
+    dev_indices = indices[:num_dev]
+    test_indices = indices[num_dev:num_dev + num_test]
+    train_indices = indices[num_dev + num_test:]
+    xs = np.array(xs)
+
+    train = xs[train_indices, :, :]
+    dev = xs[dev_indices, :, :]
+    test = xs[test_indices, :, :]
+
+    np.savez(output_file_name, train=train, dev=dev, test=test)
+    return train, dev, test
+
 def get_full_sequence_data_by_month(folder_path, num_dev_months, num_test_months, force_recompute=False):
     output_file_name = os.path.join(folder_path, f"spy_1min_full_context_by_month.npz")
     if os.path.exists(output_file_name) and not force_recompute:
@@ -219,6 +267,25 @@ def get_full_sequence_data_by_month(folder_path, num_dev_months, num_test_months
 
     np.savez(output_file_name, train=train, dev=dev, test=test)
     return train, dev, test
+
+def train_dist(dist, xs, lr, num_steps, device: torch.device = None):
+    param = torch.randn((1, dist.num_params()), device=device)
+    param = torch.nn.Parameter(param)
+    
+    nll = lambda xs_batch: -torch.mean(dist.logpdf(xs_batch.reshape(-1, 1), param))
+    optimizer = torch.optim.Adam([param], lr=lr)
+
+    for step in range(1, num_steps + 1):
+        optimizer.zero_grad()
+        loss = nll(xs)
+        loss.backward()
+        optimizer.step()
+        if step % 100 == 0:
+            print(f"Step {step}, Loss: {loss.item():.4f}")
+
+    print(f"Step {step}, Final Loss: {loss.item():.4f}")
+    
+    return param
 
 def train_model(
     model, 
@@ -295,18 +362,17 @@ def train_model(
     if output_folder is not None:
         os.makedirs(output_folder, exist_ok=True)
 
+    prev_grad = None
+    beta  = 1e-4
     for step in range(num_steps):
         model.train()
         # run mini-batch training
         total_loss = 0.0
-        for i in range(0, train_X.shape[0], batch_size):
-            batch_X = train_X[i:i+batch_size, :]
-            batch_Y = train_Y[i:i+batch_size, :]
-            loss = model(batch_X, batch_Y)
-            total_loss += loss.item() * batch_X.shape[0]
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        loss = model(train_X, train_Y)
+        total_loss += loss.item() * train_X.shape[0]
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
         # Step learning rate decay after each step
         scheduler.step()
@@ -332,7 +398,14 @@ def train_model(
     # save hyperparameters to json
     with open(os.path.join(output_folder, "hyperparameters.json"), "w") as f:
         json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size, "lr_decay_step": lr_decay_step, "lr_decay_gamma": lr_decay_gamma}, f)
-    
+    # implement early stopping
+    best_dev_loss_idx = np.argmin(df["dev_loss"])
+    best_epoch = int(df.iloc[best_dev_loss_idx]["epoch"])
+    print(f"Best epoch: {best_epoch}")
+    model_path = f"model_{best_epoch}.pth"
+    model_state_dict = torch.load(os.path.join(output_folder, model_path))
+    model.load_state_dict(model_state_dict)
+    model.to(device)
     # evaluate model on test data
     final_train_loss, final_train_loss_std = eval_loss(train_X, train_Y, batch_size)
     final_dev_loss, final_dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)

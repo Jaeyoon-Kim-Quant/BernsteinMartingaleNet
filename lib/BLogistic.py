@@ -12,7 +12,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sympy import EulerGamma
 from scipy.special import comb
-from lib.DistHead import DistHead
+from lib.DistHead import DistHead, StudentTHead, SkewedStudentTHead
+from torch.distributions import StudentT
 DT = torch.float64
 torch.set_default_dtype(DT)
 
@@ -142,3 +143,27 @@ def train_blogistic(xs, dof, lr, num_steps, device: torch.device = None):
     print(f"Step {step}, Final Loss: {loss.item():.4f}")
     
     return blogistic, param
+
+class MixedBLogistic(DistHead):
+    def __init__(self, dof, device: torch.device = None):
+        self.dof = dof
+        self.device = device if device is not None else torch.device('cpu')
+        self.blogistic = BLogistic(dof - 6, device)
+        self.skewed_studentt = SkewedStudentTHead(device)
+    
+    def num_params(self):
+        return self.dof
+    
+    def logpdf(self, xs, params):
+        blogistic_params = params[:, :self.blogistic.num_params()]
+        blogistic_logpdf = self.blogistic.logpdf(xs, blogistic_params)
+        #skewness_param = torch.nn.functional.softplus(params[:, -4]).reshape(-1, 1)
+        #std = torch.nn.functional.softplus(params[:, -3]).reshape(-1, 1)
+        #df = torch.nn.functional.softplus(params[:, -2]).reshape(-1, 1)
+        mix_param = torch.nn.functional.sigmoid(params[:, -1]).reshape(-1, 1)
+        studentt_logpdf = self.skewed_studentt.logpdf(xs, params[:, -4:-1])
+        #return studentt_logpdf
+        return torch.logsumexp(torch.stack([blogistic_logpdf + torch.log(mix_param), studentt_logpdf + torch.log(1 - mix_param)]), dim=0)
+
+    def pdf(self, xs, params):
+        return torch.exp(self.logpdf(xs, params))
