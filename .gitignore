@@ -2,5 +2,6 @@ MarketData/api_key.txt
 MarketData/*.log
 MarketData/historical_data
 Experiments/*.pth
+MichenkowResults/*.pth
 .idea/
 */__pycache__
