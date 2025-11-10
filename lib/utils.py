@@ -159,6 +159,66 @@ def get_sequence_data_by_month(folder_path, context_window, num_dev_months, num_
     np.savez(output_file_name, train_xs=train_xs, train_ys=train_ys, dev_xs=dev_xs, dev_ys=dev_ys, test_xs=test_xs, test_ys=test_ys)
     return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
 
+def get_full_sequence_data_by_month(folder_path, num_dev_months, num_test_months, force_recompute=False):
+    output_file_name = os.path.join(folder_path, f"spy_1min_full_context_by_month.npz")
+    if os.path.exists(output_file_name) and not force_recompute:
+        print("using cached data from", output_file_name)
+        f = np.load(output_file_name)
+        train = f["train"]
+        dev = f["dev"]
+        test = f["test"]
+        return train, dev, test
+    files = glob.glob(os.path.join(folder_path, "spy_1min_*.csv"))
+    xs = {}
+    ys = {}
+    months = set()
+    for file in files:
+        date_str = file.split("_")[-1].split(".")[0]
+        date_str = date_str[:4] + "-" + date_str[4:6] + "-" + date_str[6:]
+        if not is_full_nyse_day(date_str):
+            print("skipping", date_str)
+            continue
+
+        month = date_str[:7]
+        df = pd.read_csv(file)
+
+        open_time = datetime.datetime.strptime(date_str + " 09:30:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo= ZoneInfo("America/New_York"))
+        close_time = datetime.datetime.strptime(date_str + " 16:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo= ZoneInfo("America/New_York"))
+        df["ts_recv"] = pd.to_datetime(df["ts_recv"])
+        df['ts_recv_est'] = df['ts_recv'].dt.tz_convert('America/New_York')
+        df = df[(df["ts_recv_est"] >= open_time) & (df["ts_recv_est"] <= close_time)]
+        df["seconds_since_open"] = (df["ts_recv_est"] - open_time).dt.total_seconds()
+
+        data = df[["ret_60s", "rv_60s", "seconds_since_open"]].values
+        data = np.array(data)
+        if month not in xs:
+            xs[month] = []
+            ys[month] = []
+            months.add(month)
+        xs[month].append(data)
+    
+    np.random.seed(0)
+    months = np.random.permutation(list(months))
+    dev_months = months[:num_dev_months]
+    test_months = months[num_dev_months:num_dev_months + num_test_months]
+    train_months = months[num_dev_months + num_test_months:]
+    print("train months", train_months)
+    print("dev months", dev_months)
+    print("test months", test_months)
+    print("num months", len(train_months), len(dev_months), len(test_months))
+
+    def combine_data(months):
+        xs_combined = []
+        for month in months:
+            xs_combined.extend(xs[month])
+        return np.array(xs_combined)
+
+    train = combine_data(train_months)
+    dev = combine_data(dev_months)
+    test = combine_data(test_months)
+
+    np.savez(output_file_name, train=train, dev=dev, test=test)
+    return train, dev, test
 
 def train_model(
     model, 
@@ -192,6 +252,7 @@ def train_model(
     loss_steps = []
     # Helper function to compute loss in batches
     def compute_loss_batched(X, Y, batch_size):
+        return 0, 0
         model.eval()
         with torch.no_grad():
             total_loss = 0.0
@@ -217,14 +278,14 @@ def train_model(
                 # Get parameters for the batch
                 params = model.get_params(batch_X)
                 # Compute individual losses (negative logpdf) without taking mean
-                individual_losses = -model.dist_head.logpdf(batch_Y, params)
+                individual_losses = -model.dist_head.logpdf(batch_Y.reshape(-1, 1), params.reshape(-1, params.shape[-1]))
                 all_losses.append(individual_losses.cpu())
             # Concatenate all individual losses
             all_losses = torch.cat(all_losses, dim=0)
             # Calculate standard deviation
             loss_std = torch.std(all_losses).item()
             loss_mean = torch.mean(all_losses).item()
-            return loss_mean, loss_std * np.sqrt(1 / X.shape[0])
+            return loss_mean, loss_std * np.sqrt(1 / len(all_losses))
 
     train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
     dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)

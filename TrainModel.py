@@ -15,10 +15,10 @@ root = cwd.split("BernsteinMartingaleNet")[0] + "BernsteinMartingaleNet"
 if root not in sys.path:
     sys.path.append(root)
 
-from lib.utils import train_model, get_sequence_data_by_month
+from lib.utils import train_model, get_full_sequence_data_by_month
 from lib.BLogistic import BLogistic
 from lib.DistHead import NormalHead, StudentTHead, SkewedStudentTHead
-from lib.Michenkow import Michenkow
+from lib.Michenkow import Michenkow, MichenkowManytoMany
 
 # get command line arguments
 parser = argparse.ArgumentParser()
@@ -49,15 +49,30 @@ else:
 
 folder_path = root + "/MarketData/historical_data"
 context_window = 60
-train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys = get_sequence_data_by_month(folder_path, context_window, 8, 8)
+#train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys = get_sequence_data_by_month(folder_path, context_window, 8, 8)
+#
+#train_xs = torch.tensor(train_xs[:, :, 0], device=device)
+#train_ys = torch.tensor(train_ys, device=device).reshape(-1, 1)
+#dev_xs = torch.tensor(dev_xs[:, :, 0], device=device)
+#dev_ys = torch.tensor(dev_ys, device=device).reshape(-1, 1)
+#test_xs = torch.tensor(test_xs[:, :, 0], device=device)
+#test_ys = torch.tensor(test_ys, device=device).reshape(-1, 1)
+#
+#std = torch.sqrt((train_ys**2).mean())
+#train_xs = train_xs / std
+#dev_xs = dev_xs / std
+#test_xs = test_xs / std
+#train_ys = train_ys / std
+#dev_ys = dev_ys / std
+#test_ys = test_ys / std
 
-train_xs = torch.tensor(train_xs[:, :, 0], device=device)
-train_ys = torch.tensor(train_ys, device=device).reshape(-1, 1)
-dev_xs = torch.tensor(dev_xs[:, :, 0], device=device)
-dev_ys = torch.tensor(dev_ys, device=device).reshape(-1, 1)
-test_xs = torch.tensor(test_xs[:, :, 0], device=device)
-test_ys = torch.tensor(test_ys, device=device).reshape(-1, 1)
-
+train, dev, test = get_full_sequence_data_by_month(folder_path, 8, 8)
+train_xs = torch.tensor(train[:-1, :, 0], device=device)
+dev_xs = torch.tensor(dev[:-1, :, 0], device=device)
+test_xs = torch.tensor(test[:-1, :, 0], device=device)
+train_ys = torch.tensor(train[1:, :, 0], device=device)
+dev_ys = torch.tensor(dev[1:, :, 0], device=device)
+test_ys = torch.tensor(test[1:, :, 0], device=device)
 std = torch.sqrt((train_ys**2).mean())
 train_xs = train_xs / std
 dev_xs = dev_xs / std
@@ -65,16 +80,16 @@ test_xs = test_xs / std
 train_ys = train_ys / std
 dev_ys = dev_ys / std
 test_ys = test_ys / std
-
+print(train_xs.shape, train_ys.shape, dev_xs.shape, dev_ys.shape, test_xs.shape, test_ys.shape)
 
 lr = 0.002
-decay_step = 50
+decay_step = 100
 decay_gamma = 0.5
 weight_decay = 0.002
 num_steps = 300
-batch_size = 512 * 8
+batch_size = 1024
 
-model = Michenkow(context_window, dist_head, device)
+model = MichenkowManytoMany(context_window, dist_head, device)
 
 model, train_losses, dev_losses = train_model(model, train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys,
     lr, weight_decay, num_steps, batch_size=batch_size, device=device, output_folder=args.output_folder, lr_decay_step=decay_step, lr_decay_gamma=decay_gamma)
