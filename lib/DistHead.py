@@ -20,8 +20,8 @@ class NormalHead(DistHead):
         self.device = device if device is not None else torch.device('cpu')
     
     def _get_dist(self, params):
-        mean = torch.nn.functional.softplus(params[0])
-        std = torch.nn.functional.softplus(params[1])
+        mean = torch.nn.functional.softplus(params[:, 0]).reshape(-1, 1)
+        std = torch.nn.functional.softplus(params[:, 1]).reshape(-1, 1)
         return Normal(mean, std)
     
     def logpdf(self, xs, params):
@@ -40,9 +40,9 @@ class StudentTHead(DistHead):
         self.device = device if device is not None else torch.device('cpu')
     
     def _get_dist(self, params):
-        mean= torch.nn.functional.softplus(params[0])
-        std = torch.nn.functional.softplus(params[1])
-        df = torch.nn.functional.softplus(params[2])
+        mean= torch.nn.functional.softplus(params[:, 0]).reshape(-1, 1)
+        std = torch.nn.functional.softplus(params[:, 1]).reshape(-1, 1)
+        df = torch.nn.functional.softplus(params[:, 2]).reshape(-1, 1)
         return StudentT(df, mean, std)
     
     def logpdf(self, xs, params):
@@ -61,10 +61,10 @@ class SkewedStudentTHead(DistHead):
         self.device = device if device is not None else torch.device('cpu')
     
     def _get_dist(self, params):
-        mean = torch.nn.functional.softplus(params[0])
-        std = torch.nn.functional.softplus(params[1])
-        df = torch.nn.functional.softplus(params[2])
-        skewness = torch.nn.functional.softplus(params[3])
+        mean = torch.nn.functional.softplus(params[:, 0]).reshape(-1, 1)
+        std = torch.nn.functional.softplus(params[:, 1]).reshape(-1, 1)
+        df = torch.nn.functional.softplus(params[:, 2]).reshape(-1, 1)
+        skewness = torch.nn.functional.softplus(params[:, 3]).reshape(-1, 1)
         return mean, std, df, skewness
     
     def logpdf(self, xs, params):
