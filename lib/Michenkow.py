@@ -83,7 +83,7 @@ class Michenkow(nn.Module):
 class MichenkowManytoMany(nn.Module):
     def __init__(self, context_window, dist_head, device):
         super().__init__()
-        self.context_window = context_window
+        #self.context_window = context_window
         self.dist_head      = dist_head
         self.device         = device
         self.layer_sizes    = [128, 64, 32]
