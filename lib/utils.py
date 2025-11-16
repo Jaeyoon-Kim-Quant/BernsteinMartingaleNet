@@ -189,9 +189,12 @@ def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recomp
         data = df[["ret_60s", "rv_60s", "seconds_since_open"]].values
         data = np.array(data)
         xs.append(data)
-    
+
+    print(len(xs))
     np.random.seed(0)
     num_samples = len(xs)
+
+    # I dont think
     num_dev = int(num_samples * frac_dev)
     num_test = int(num_samples * frac_test)
     indices = np.random.permutation(len(xs))
@@ -314,24 +317,25 @@ def train_model(
         batch_size = train_X.shape[0]
     if verbose:
         print("num batches", train_X.shape[0] // batch_size)
+
     train_losses = []
     dev_losses = []
     loss_steps = []
+
     # Helper function to compute loss in batches
-    def compute_loss_batched(X, Y, batch_size):
-        return 0, 0
-        model.eval()
-        with torch.no_grad():
-            total_loss = 0.0
-            num_samples = 0
-            for i in range(0, X.shape[0], batch_size):
-                batch_X = X[i:i+batch_size, :]
-                batch_Y = Y[i:i+batch_size, :]
-                batch_loss = model(batch_X, batch_Y)
-                batch_size_actual = batch_X.shape[0]
-                total_loss += batch_loss.item() * batch_size_actual
-                num_samples += batch_size_actual
-            return total_loss / num_samples if num_samples > 0 else 0.0
+    # def compute_loss_batched(X, Y, batch_size):
+    #     model.eval()
+    #     with torch.no_grad():
+    #         total_loss = 0.0
+    #         num_samples = 0
+    #         for i in range(0, X.shape[0], batch_size):
+    #             batch_X = X[i:i+batch_size, :]
+    #             batch_Y = Y[i:i+batch_size, :]
+    #             batch_loss = model(batch_X, batch_Y)
+    #             batch_size_actual = batch_X.shape[0]
+    #             total_loss += batch_loss.item() * batch_size_actual
+    #             num_samples += batch_size_actual
+    #         return total_loss / num_samples if num_samples > 0 else 0.0
 
     # Helper function to compute individual losses and their std
     def eval_loss(X, Y, batch_size):
@@ -357,16 +361,14 @@ def train_model(
     train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
     dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
     if verbose:
-        print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}")
+        print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, "
+              f"Dev Loss confidence interval: {dev_loss - 1.96 * dev_loss_std:.4f}, {dev_loss + 1.96 * dev_loss_std:.4f}")
 
     if output_folder is not None:
         os.makedirs(output_folder, exist_ok=True)
 
-    prev_grad = None
-    beta  = 1e-4
     for step in range(num_steps):
         model.train()
-        # run mini-batch training
         total_loss = 0.0
         loss = model(train_X, train_Y)
         total_loss += loss.item() * train_X.shape[0]
@@ -391,7 +393,10 @@ def train_model(
 
             if verbose:
                 current_lr = optimizer.param_groups[0]['lr']
-                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}, LR: {current_lr:.6f}")
+                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, "
+                      f"Dev Loss confidence interval: {dev_loss - 1.96 * dev_loss_std:.4f}, "
+                      f"{dev_loss + 1.96 * dev_loss_std:.4f}, LR: {current_lr:.6f}")
+
     # save losses to csv
     df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
     df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
@@ -414,6 +419,7 @@ def train_model(
     print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {final_dev_loss - 2 * final_dev_loss_std:.4f}, {final_dev_loss + 2 * final_dev_loss_std:.4f}")
     print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {test_loss - 2 * test_loss_std:.4f}, {test_loss + 2 * test_loss_std:.4f}")
     # save final losses to csv
+
     final_df = pd.DataFrame({"data_type": ["train", "dev", "test"], "loss": [final_train_loss, final_dev_loss, test_loss], "loss_std": [final_train_loss_std, final_dev_loss_std, test_loss_std]})
     final_df.to_csv(os.path.join(output_folder, "final_losses.csv"), index=False)
 

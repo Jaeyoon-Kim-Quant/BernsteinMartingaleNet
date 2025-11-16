@@ -1,4 +1,3 @@
-# take command line arguments
 # output folder, dist type, optional parameter for dist type
 
 import sys
@@ -30,7 +29,7 @@ args = parser.parse_args()
 assert torch.cuda.is_available()
 device = torch.device('cuda')
 
-#context_window = 60
+context_window = 60
 
 dist_head = None
 if args.dist_type == "Normal":
@@ -54,7 +53,6 @@ else:
 
 folder_path = root + "/MarketData/historical_data"
 
-#context_window = 60
 #train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys = get_sequence_data_by_month(folder_path, context_window, 8, 8)
 #
 #train_xs = torch.tensor(train_xs[:, :, 0], device=device)
@@ -130,4 +128,5 @@ for param in model.lstm3.parameters():
 #    model.fc.bias.copy_(new_params)
 
 model, train_losses, dev_losses = train_model(model, train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys,
-    lr, weight_decay, num_steps, batch_size=batch_size, device=device, output_folder=args.output_folder, lr_decay_step=decay_step, lr_decay_gamma=decay_gamma)
+                                              lr, weight_decay, num_steps, batch_size=batch_size, device=device,
+                                              output_folder=args.output_folder, lr_decay_step=decay_step, lr_decay_gamma=decay_gamma)

@@ -39,7 +39,6 @@ class Michenkow(nn.Module):
         )
 
         self.dropout = nn.Dropout(0.02)
-
         self.fc = nn.Linear(self.layer_sizes[2], dist_head.num_params())
         nn.init.uniform_(self.fc.weight, -0.01, 0.01)
         nn.init.zeros_(self.fc.bias)
@@ -53,11 +52,6 @@ class Michenkow(nn.Module):
         return -logpdf.mean()
 
     def get_params(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(-1)
-        elif x.dim() == 3 and x.shape[1] == 1:
-            x = x.transpose(1, 2)
-
         x, _ = self.lstm1(x)
         x = self.dropout(x)
 
@@ -79,24 +73,22 @@ class Michenkow(nn.Module):
     def get_pdf(self, x, sample_xs):
         return torch.exp(self.get_logpdf(x, sample_xs))
 
-
 class MichenkowManytoMany(nn.Module):
-    def __init__(self, context_window, dist_head, device):
+    def __init__(self, dist_head, device, feature_size=1):
         super().__init__()
-        #self.context_window = context_window
         self.dist_head      = dist_head
         self.device         = device
+        self.feature_size   = feature_size
         self.layer_sizes    = [128, 64, 32]
 
-        print(f"\nInitializing LSTM with context_window={context_window}, dist={dist_head.__class__.__name__}, dof={dist_head.num_params()}")
+        print(f"\nInitializing LSTM with dist={dist_head.__class__.__name__}, dof={dist_head.num_params()}")
 
         # LSTM layers (3 layers with decreasing neurons: 128 -> 64 -> 32)
         self.lstm1 = nn.LSTM(
-            input_size=1,
+            input_size=self.feature_size,
             hidden_size=self.layer_sizes[0],
             num_layers=1,
             batch_first=True,
-            dropout=0
         )
 
         self.lstm2 = nn.LSTM(
@@ -104,7 +96,6 @@ class MichenkowManytoMany(nn.Module):
             hidden_size=self.layer_sizes[1],
             num_layers=1,
             batch_first=True,
-            dropout=0
         )
 
         self.lstm3 = nn.LSTM(
@@ -112,15 +103,13 @@ class MichenkowManytoMany(nn.Module):
             hidden_size=self.layer_sizes[2],
             num_layers=1,
             batch_first=True,
-            dropout=0
         )
 
-        self.dropout = nn.Dropout(0.02)
+        self.dropout = nn.Dropout(0.2) # should this be 0.2?
 
         self.fc = nn.Linear(self.layer_sizes[2], dist_head.num_params())
         nn.init.uniform_(self.fc.weight, -0.01, 0.01)
         nn.init.zeros_(self.fc.bias)
-
 
     def forward(self, x, y):
         params = self.get_params(x)
@@ -131,11 +120,6 @@ class MichenkowManytoMany(nn.Module):
         return -logpdf.mean()
 
     def get_params(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(-1)
-        elif x.dim() == 3 and x.shape[1] == 1:
-            x = x.transpose(1, 2)
-
         x, _ = self.lstm1(x)
         x = self.dropout(x)
 
