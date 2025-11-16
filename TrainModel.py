@@ -53,6 +53,7 @@ else:
     raise ValueError(f"Invalid dist type: {args.dist_type}")
 
 folder_path = root + "/MarketData/historical_data"
+
 #context_window = 60
 #train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys = get_sequence_data_by_month(folder_path, context_window, 8, 8)
 #
