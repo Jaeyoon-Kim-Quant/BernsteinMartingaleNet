@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import torch
 import torch.optim as optim
 import json
+import matplotlib.pyplot as plt
 
 def load_data(file_path):
     df = pd.read_csv(file_path)
@@ -324,6 +325,20 @@ def train_dist(dist, xs, lr, num_steps, device: torch.device = None):
     
     return param
 
+def add_loss_plot(df, output_file):
+    epoch = df["epoch"]
+    train_loss = df["train_loss"]
+    dev_loss = df["dev_loss"]
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(epoch, train_loss, label="Train Loss", linewidth=2)
+    ax.plot(epoch, dev_loss, label="Dev Loss", linewidth=2)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss (Negative Log-Likelihood)")
+    ax.set_title("Training and Validation Loss")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.savefig(output_file)
+
 def train_model(
     model, 
     train_X, 
@@ -341,6 +356,7 @@ def train_model(
     output_folder=None,
     lr_decay_step=200,    # every N steps to decay learning rate
     lr_decay_gamma=0.5,   # decay factor
+    keep_checkpoints=False,
 ):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -445,5 +461,10 @@ def train_model(
     if output_folder is not None:
         # save model
         torch.save(model.state_dict(), os.path.join(output_folder, f"final_model.pth"))
+    
+    add_loss_plot(df, os.path.join(output_folder, "losses.png"))
+    if not keep_checkpoints:
+        for file in glob.glob(os.path.join(output_folder, "model_*.pth")):
+            os.remove(file)
 
     return model, train_losses, dev_losses
