@@ -209,6 +209,30 @@ def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recomp
     np.savez(output_file_name, train=train, dev=dev, test=test)
     return train, dev, test
 
+def get_normalized_data(folder_path, feature_size, device, frac_dev, frac_test, force_recompute=False):
+    train, dev, test = get_full_sequence_data_by_day(folder_path, 0.2, 0.2)
+
+    def parse_data(data, feature_size):
+        data = torch.tensor(data, device=device)
+        xs = data[:, :-1, :feature_size]
+        ys = data[:, 1:, 0]
+        return xs.clone(), ys.clone()
+
+    train_xs, train_ys = parse_data(train, feature_size)
+    dev_xs, dev_ys = parse_data(dev, feature_size)
+    test_xs, test_ys = parse_data(test, feature_size)
+
+    x_mean = train_xs.mean(dim=(0, 1))
+    x_mean[0] = 0
+    std_x = torch.sqrt(((train_xs - x_mean)**2).mean(dim=(0, 1)))
+    train_xs = (train_xs - x_mean) / std_x
+    dev_xs = (dev_xs - x_mean) / std_x
+    test_xs = (test_xs - x_mean) / std_x
+    train_ys /= std_x[0]
+    dev_ys /= std_x[0]
+    test_ys /= std_x[0]
+    return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
+
 def get_full_sequence_data_by_month(folder_path, num_dev_months, num_test_months, force_recompute=False):
     output_file_name = os.path.join(folder_path, f"spy_1min_full_context_by_month.npz")
     if os.path.exists(output_file_name) and not force_recompute:
