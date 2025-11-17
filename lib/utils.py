@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import torch
 import torch.optim as optim
 import json
+import matplotlib.pyplot as plt
 
 def load_data(file_path):
     df = pd.read_csv(file_path)
@@ -220,6 +221,30 @@ def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recomp
     np.savez(output_file_name, train=train, dev=dev, test=test)
     return train, dev, test
 
+def get_normalized_data(folder_path, feature_size, device, frac_dev, frac_test, force_recompute=False):
+    train, dev, test = get_full_sequence_data_by_day(folder_path, 0.2, 0.2)
+
+    def parse_data(data, feature_size):
+        data = torch.tensor(data, device=device)
+        xs = data[:, :-1, :feature_size]
+        ys = data[:, 1:, 0]
+        return xs.clone(), ys.clone()
+
+    train_xs, train_ys = parse_data(train, feature_size)
+    dev_xs, dev_ys = parse_data(dev, feature_size)
+    test_xs, test_ys = parse_data(test, feature_size)
+
+    x_mean = train_xs.mean(dim=(0, 1))
+    x_mean[0] = 0
+    std_x = torch.sqrt(((train_xs - x_mean)**2).mean(dim=(0, 1)))
+    train_xs = (train_xs - x_mean) / std_x
+    dev_xs = (dev_xs - x_mean) / std_x
+    test_xs = (test_xs - x_mean) / std_x
+    train_ys /= std_x[0]
+    dev_ys /= std_x[0]
+    test_ys /= std_x[0]
+    return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
+
 def get_full_sequence_data_by_month(folder_path, num_dev_months, num_test_months, force_recompute=False):
     output_file_name = os.path.join(folder_path, f"spy_1min_full_context_by_month.npz")
     if os.path.exists(output_file_name) and not force_recompute:
@@ -300,6 +325,20 @@ def train_dist(dist, xs, lr, num_steps, device: torch.device = None):
     
     return param
 
+def add_loss_plot(df, output_file):
+    epoch = df["epoch"]
+    train_loss = df["train_loss"]
+    dev_loss = df["dev_loss"]
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(epoch, train_loss, label="Train Loss", linewidth=2)
+    ax.plot(epoch, dev_loss, label="Dev Loss", linewidth=2)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss (Negative Log-Likelihood)")
+    ax.set_title("Training and Validation Loss")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.savefig(output_file)
+
 def train_model(
     model, 
     train_X, 
@@ -317,6 +356,7 @@ def train_model(
     output_folder=None,
     lr_decay_step=200,    # every N steps to decay learning rate
     lr_decay_gamma=0.5,   # decay factor
+    keep_checkpoints=False,
 ):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -327,24 +367,10 @@ def train_model(
         batch_size = train_X.shape[0]
     if verbose:
         print("num batches", train_X.shape[0] // batch_size)
+
     train_losses = []
     dev_losses = []
     loss_steps = []
-    # Helper function to compute loss in batches
-    def compute_loss_batched(X, Y, batch_size):
-        return 0, 0
-        model.eval()
-        with torch.no_grad():
-            total_loss = 0.0
-            num_samples = 0
-            for i in range(0, X.shape[0], batch_size):
-                batch_X = X[i:i+batch_size, :]
-                batch_Y = Y[i:i+batch_size, :]
-                batch_loss = model(batch_X, batch_Y)
-                batch_size_actual = batch_X.shape[0]
-                total_loss += batch_loss.item() * batch_size_actual
-                num_samples += batch_size_actual
-            return total_loss / num_samples if num_samples > 0 else 0.0
 
     # Helper function to compute individual losses and their std
     def eval_loss(X, Y, batch_size):
@@ -369,17 +395,16 @@ def train_model(
 
     train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
     dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
+    get_confidence_interval = lambda loss, loss_std: f"confidence interval: ({loss - 1.96 * loss_std:.4f}, {loss + 1.96 * loss_std:.4f})"
     if verbose:
-        print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}")
+        print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, "
+              f"Dev Loss confidence interval: {get_confidence_interval(dev_loss, dev_loss_std)}")
 
     if output_folder is not None:
         os.makedirs(output_folder, exist_ok=True)
 
-    prev_grad = None
-    beta  = 1e-4
     for step in range(num_steps):
         model.train()
-        # run mini-batch training
         total_loss = 0.0
         loss = model(train_X, train_Y)
         total_loss += loss.item() * train_X.shape[0]
@@ -404,7 +429,9 @@ def train_model(
 
             if verbose:
                 current_lr = optimizer.param_groups[0]['lr']
-                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, Dev Loss confidence interval: {dev_loss - 2 * dev_loss_std:.4f}, {dev_loss + 2 * dev_loss_std:.4f}, LR: {current_lr:.6f}")
+                print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, "
+                      f"Dev Loss confidence interval: {get_confidence_interval(dev_loss, dev_loss_std)}, LR: {current_lr:.6f}")
+
     # save losses to csv
     df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
     df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
@@ -423,15 +450,21 @@ def train_model(
     final_train_loss, final_train_loss_std = eval_loss(train_X, train_Y, batch_size)
     final_dev_loss, final_dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
     test_loss, test_loss_std = eval_loss(test_X, test_Y, batch_size)
-    print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {final_train_loss - 2 * final_train_loss_std:.4f}, {final_train_loss + 2 * final_train_loss_std:.4f}")
-    print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {final_dev_loss - 2 * final_dev_loss_std:.4f}, {final_dev_loss + 2 * final_dev_loss_std:.4f}")
-    print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {test_loss - 2 * test_loss_std:.4f}, {test_loss + 2 * test_loss_std:.4f}")
+    print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {get_confidence_interval(final_train_loss, final_train_loss_std)}")
+    print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {get_confidence_interval(final_dev_loss, final_dev_loss_std)}")
+    print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {get_confidence_interval(test_loss, test_loss_std)}")
     # save final losses to csv
+
     final_df = pd.DataFrame({"data_type": ["train", "dev", "test"], "loss": [final_train_loss, final_dev_loss, test_loss], "loss_std": [final_train_loss_std, final_dev_loss_std, test_loss_std]})
     final_df.to_csv(os.path.join(output_folder, "final_losses.csv"), index=False)
 
     if output_folder is not None:
         # save model
         torch.save(model.state_dict(), os.path.join(output_folder, f"final_model.pth"))
+    
+    add_loss_plot(df, os.path.join(output_folder, "losses.png"))
+    if not keep_checkpoints:
+        for file in glob.glob(os.path.join(output_folder, "model_*.pth")):
+            os.remove(file)
 
     return model, train_losses, dev_losses
