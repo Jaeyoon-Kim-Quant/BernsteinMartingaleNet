@@ -1,4 +1,3 @@
-import sys
 import os
 import numpy as np
 import pandas as pd
@@ -7,7 +6,6 @@ import datetime
 import exchange_calendars as ec
 from zoneinfo import ZoneInfo
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import json
 
@@ -159,8 +157,8 @@ def get_sequence_data_by_month(folder_path, context_window, num_dev_months, num_
     np.savez(output_file_name, train_xs=train_xs, train_ys=train_ys, dev_xs=dev_xs, dev_ys=dev_ys, test_xs=test_xs, test_ys=test_ys)
     return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
 
-def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recompute=False):
-    output_file_name = os.path.join(folder_path, f"spy_1min_full_context_by_day_frac_dev_{frac_dev:.3f}_frac_test_{frac_test:.3f}.npz")
+def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recompute=False, num_buckets=5):
+    output_file_name = os.path.join(folder_path, f"spy_1min_full_context_by_day_frac_dev_{frac_dev:.3f}_frac_test_{frac_test:.3f}_num_buckets_{num_buckets}.npz")
     if os.path.exists(output_file_name) and not force_recompute:
         print("using cached data from", output_file_name)
         f = np.load(output_file_name)
@@ -168,8 +166,9 @@ def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recomp
         dev = f["dev"]
         test = f["test"]
         return train, dev, test
-    files = glob.glob(os.path.join(folder_path, "spy_1min_*.csv"))
+    files = sorted(glob.glob(os.path.join(folder_path, "spy_1min_*.csv")))
     xs = []
+    total_rv = []
     for file in files:
         date_str = file.split("_")[-1].split(".")[0]
         date_str = date_str[:4] + "-" + date_str[4:6] + "-" + date_str[6:]
@@ -189,20 +188,34 @@ def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recomp
         data = df[["ret_60s", "rv_60s", "seconds_since_open"]].values
         data = np.array(data)
         xs.append(data)
+        total_rv.append(np.sum(data[:, 1]))
+    xs = np.array(xs)
     
     np.random.seed(0)
-    num_samples = len(xs)
-    num_dev = int(num_samples * frac_dev)
-    num_test = int(num_samples * frac_test)
-    indices = np.random.permutation(len(xs))
-    dev_indices = indices[:num_dev]
-    test_indices = indices[num_dev:num_dev + num_test]
-    train_indices = indices[num_dev + num_test:]
-    xs = np.array(xs)
+    # bucket by total rv
+    total_rv = np.array(total_rv)
+    quantiles = np.quantile(total_rv, np.linspace(0, 1, num_buckets + 1)[1:-1])
+    quantiles = np.concatenate([[0], quantiles, [np.inf]])
+    bucket_indices = np.digitize(total_rv, quantiles) - 1
+    train_xs = []
+    dev_xs = []
+    test_xs = []
+    for i in range(num_buckets):
+        bucket_xs = xs[bucket_indices == i]
+        num_samples = bucket_xs.shape[0]
+        num_dev = int(num_samples * frac_dev)
+        num_test = int(num_samples * frac_test)
+        indices = np.random.permutation(num_samples)
+        dev_indices = indices[:num_dev]
+        test_indices = indices[num_dev:num_dev + num_test]
+        train_indices = indices[num_dev + num_test:]
+        train_xs.append(bucket_xs[train_indices, :, :])
+        dev_xs.append(bucket_xs[dev_indices, :, :])
+        test_xs.append(bucket_xs[test_indices, :, :])
 
-    train = xs[train_indices, :, :]
-    dev = xs[dev_indices, :, :]
-    test = xs[test_indices, :, :]
+    train = np.vstack(train_xs)
+    dev = np.vstack(dev_xs)
+    test = np.vstack(test_xs)
 
     np.savez(output_file_name, train=train, dev=dev, test=test)
     return train, dev, test
