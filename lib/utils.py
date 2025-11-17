@@ -356,21 +356,6 @@ def train_model(
     dev_losses = []
     loss_steps = []
 
-    # Helper function to compute loss in batches
-    # def compute_loss_batched(X, Y, batch_size):
-    #     model.eval()
-    #     with torch.no_grad():
-    #         total_loss = 0.0
-    #         num_samples = 0
-    #         for i in range(0, X.shape[0], batch_size):
-    #             batch_X = X[i:i+batch_size, :]
-    #             batch_Y = Y[i:i+batch_size, :]
-    #             batch_loss = model(batch_X, batch_Y)
-    #             batch_size_actual = batch_X.shape[0]
-    #             total_loss += batch_loss.item() * batch_size_actual
-    #             num_samples += batch_size_actual
-    #         return total_loss / num_samples if num_samples > 0 else 0.0
-
     # Helper function to compute individual losses and their std
     def eval_loss(X, Y, batch_size):
         model.eval()
@@ -394,9 +379,10 @@ def train_model(
 
     train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
     dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
+    get_confidence_interval = lambda loss, loss_std: f"confidence interval: ({loss - 1.96 * loss_std:.4f}, {loss + 1.96 * loss_std:.4f})"
     if verbose:
         print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, "
-              f"Dev Loss confidence interval: {dev_loss - 1.96 * dev_loss_std:.4f}, {dev_loss + 1.96 * dev_loss_std:.4f}")
+              f"Dev Loss confidence interval: {get_confidence_interval(dev_loss, dev_loss_std)}")
 
     if output_folder is not None:
         os.makedirs(output_folder, exist_ok=True)
@@ -428,8 +414,7 @@ def train_model(
             if verbose:
                 current_lr = optimizer.param_groups[0]['lr']
                 print(f"Step {step}, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, "
-                      f"Dev Loss confidence interval: {dev_loss - 1.96 * dev_loss_std:.4f}, "
-                      f"{dev_loss + 1.96 * dev_loss_std:.4f}, LR: {current_lr:.6f}")
+                      f"Dev Loss confidence interval: {get_confidence_interval(dev_loss, dev_loss_std)}, LR: {current_lr:.6f}")
 
     # save losses to csv
     df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
@@ -449,9 +434,9 @@ def train_model(
     final_train_loss, final_train_loss_std = eval_loss(train_X, train_Y, batch_size)
     final_dev_loss, final_dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
     test_loss, test_loss_std = eval_loss(test_X, test_Y, batch_size)
-    print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {final_train_loss - 2 * final_train_loss_std:.4f}, {final_train_loss + 2 * final_train_loss_std:.4f}")
-    print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {final_dev_loss - 2 * final_dev_loss_std:.4f}, {final_dev_loss + 2 * final_dev_loss_std:.4f}")
-    print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {test_loss - 2 * test_loss_std:.4f}, {test_loss + 2 * test_loss_std:.4f}")
+    print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {get_confidence_interval(final_train_loss, final_train_loss_std)}")
+    print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {get_confidence_interval(final_dev_loss, final_dev_loss_std)}")
+    print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {get_confidence_interval(test_loss, test_loss_std)}")
     # save final losses to csv
 
     final_df = pd.DataFrame({"data_type": ["train", "dev", "test"], "loss": [final_train_loss, final_dev_loss, test_loss], "loss_std": [final_train_loss_std, final_dev_loss_std, test_loss_std]})
