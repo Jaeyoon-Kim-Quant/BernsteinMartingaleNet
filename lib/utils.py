@@ -190,7 +190,6 @@ def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recomp
         data = np.array(data)
         xs.append(data)
 
-    print(len(xs))
     np.random.seed(0)
     num_samples = len(xs)
 
