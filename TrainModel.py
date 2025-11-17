@@ -50,7 +50,7 @@ elif args.dist_type == "MixedBLogistic":
 else:
     raise ValueError(f"Invalid dist type: {args.dist_type}")
 
-feature_size = args.num_features
+feature_size = args.num_features # features in order: returns, realized variance, time
 assert feature_size >= 1 and feature_size <= 3
 
 folder_path = root + "/MarketData/historical_data"
