@@ -221,8 +221,8 @@ def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recomp
     np.savez(output_file_name, train=train, dev=dev, test=test)
     return train, dev, test
 
-def get_normalized_data(folder_path, feature_size, device, frac_dev, frac_test, force_recompute=False):
-    train, dev, test = get_full_sequence_data_by_day(folder_path, 0.2, 0.2)
+def get_normalized_data(folder_path, feature_size, device, frac_dev, frac_test, force_recompute=False, num_buckets = 5):
+    train, dev, test = get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recompute=force_recompute, num_buckets=num_buckets)
 
     def parse_data(data, feature_size):
         data = torch.tensor(data, device=device)
