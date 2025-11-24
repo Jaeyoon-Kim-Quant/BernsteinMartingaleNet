@@ -405,12 +405,20 @@ def train_model(
 
     for step in range(num_steps):
         model.train()
-        total_loss = 0.0
-        loss = model(train_X, train_Y)
-        total_loss += loss.item() * train_X.shape[0]
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        for i in range(0, train_X.shape[0], batch_size):
+            batch_X = train_X[i:i+batch_size, :]
+            batch_Y = train_Y[i:i+batch_size, :]
+            loss = model(batch_X, batch_Y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        #model.train()
+        #total_loss = 0.0
+        #loss = model(train_X, train_Y)
+        #total_loss += loss.item() * train_X.shape[0]
+        #optimizer.zero_grad()
+        #loss.backward()
+        #optimizer.step()
 
         # Step learning rate decay after each step
         scheduler.step()
