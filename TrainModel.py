@@ -17,7 +17,7 @@ if root not in sys.path:
 from lib.utils import train_model, get_normalized_data, train_dist
 from lib.BLogistic import BLogistic, MixedBLogistic
 from lib.DistHead import NormalHead, StudentTHead, SkewedStudentTHead
-from lib.Michenkow import Michenkow, MichenkowManytoMany
+from lib.Michenkow import Michenkow, MichenkowManytoMany, AdjustedMichenkow
 from lib.AttnLSTM import AttnLSTM
 # get command line arguments
 parser = argparse.ArgumentParser()
@@ -62,16 +62,16 @@ decay_gamma = 0.5
 weight_decay = 0
 weight_decay = 0.000
 num_steps = 400 + 1
-batch_size = 32
+batch_size = 1024
 
 #model = MichenkowManytoMany(dist_head, device, feature_size=feature_size)
-architecture = AttnLSTM
+architecture = AdjustedMichenkow
 model = architecture(dist_head, device, feature_size=feature_size)
-transfer_learning = False
+transfer_learning = True
 if transfer_learning:
-    model = architecture(BLogistic(dof-2, device), device, feature_size=feature_size)
-    state_dict = torch.load(root + "/MichenkowResults/BLogisticAttention/final_model.pth")
-    model.load_state_dict(state_dict)
+    #model = architecture(BLogistic(dof-2, device), device, feature_size=feature_size)
+    #state_dict = torch.load(root + "/MichenkowResults/BLogisticAttention/final_model.pth")
+    #model.load_state_dict(state_dict)
 
     # transfer learning from base model
     #with torch.no_grad():
@@ -92,10 +92,10 @@ if transfer_learning:
     #for param in model.lstm3.parameters():
     #    param.requires_grad = False
 
-    #iid_xs = train_xs[:, :, 0].flatten()
-    #new_params = train_dist(dist_head, iid_xs, 0.1, 300, device)
-    #with torch.no_grad():
-    #    model.fc.bias.copy_(new_params)
+    iid_xs = train_xs[:, :, 0].flatten()
+    new_params = train_dist(dist_head, iid_xs, 0.1, 500, device)
+    with torch.no_grad():
+        model.fc.bias.copy_(new_params.flatten())
 
 model, train_losses, dev_losses = train_model(model, train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys,
                                               lr, weight_decay, num_steps, batch_size=batch_size, device=device,
