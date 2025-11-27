@@ -70,17 +70,17 @@ class SkewedStudentTHead(DistHead):
     def __init__(self, device: torch.device = None):
         self.device = device if device is not None else torch.device('cpu')
     
-    def _get_dist(self, params):
+    def _process_params(self, params):
         std = torch.nn.functional.softplus(params[:, 0]).reshape(-1, 1)
         df = 1 + torch.nn.functional.softplus(params[:, 1]).reshape(-1, 1) # ensures well defined mean
         skewness = torch.nn.functional.softplus(params[:, 2]).reshape(-1, 1)
-        return std, df, skewness
+        mean_correction = (skewness ** 2 - skewness ** -2) * 2 * df
+        mean_correction /= (skewness + 1/skewness) * (df - 1) * torch.sqrt(torch.pi * df)
+        mean_correction *= torch.exp(torch.lgamma((df + 1) / 2) - torch.lgamma(df / 2))
+        return std, df, skewness, mean_correction
     
     def logpdf(self, xs, params):
-        std, df, skewness = self._get_dist(params)
-        mean_correction = (skewness ** 2 - skewness ** -2) * 2 * df
-        mean_correction /= (skewness + 1/skewness) * (df - 1) * torch.sqrt(torch.tensor(np.pi) * df)
-        mean_correction *= torch.exp(torch.lgamma((df + 1) / 2) - torch.lgamma(df / 2))
+        std, df, skewness, mean_correction = self._process_params(params)
         z = xs / std + mean_correction
 
         # Piecewise rescale: positive side uses 1/g, negative side uses g
@@ -100,12 +100,5 @@ class SkewedStudentTHead(DistHead):
         return 3
 
     def get_variance(self, params):
-        df = torch.nn.functional.softplus(params[:, 1]).reshape(-1, 1) + 1 # ensures well defined mean
-        std = torch.nn.functional.softplus(params[:, 0]).reshape(-1, 1)
-        skewness = torch.nn.functional.softplus(params[:, 2]).reshape(-1, 1)
-
-        mean_correction = (skewness ** 2 - skewness ** -2) * 2 * df
-        mean_correction /= (skewness + 1/skewness) * (df - 1) * torch.sqrt(torch.tensor(np.pi) * df)
-        mean_correction *= torch.exp(torch.lgamma((df + 1) / 2) - torch.lgamma(df / 2))
-
+        std, df, skewness, mean_correction = self._process_params(params)
         return std ** 2 * (df / (df - 2) * (skewness ** 2 - 1 + skewness ** -2) - mean_correction ** 2)
