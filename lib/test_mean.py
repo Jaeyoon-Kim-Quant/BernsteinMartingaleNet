@@ -17,7 +17,7 @@ from lib.utils import load_data
 @pytest.fixture(scope="module")
 def device():
     """Fixture to provide the device (GPU if available, otherwise CPU)."""
-    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    return torch.device('cpu')#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 @pytest.fixture(scope="module")
@@ -123,6 +123,23 @@ class TestBLogisticMean:
         max_diff = abs(naive_pdf - pdf).max().item()
         assert max_diff < eps, \
             f"naive_pdf does not match pdf for param_index={param_index}: max_diff={max_diff}"
+    
+    @pytest.mark.parametrize("param_index", range(4))  # degree + 1 = 4
+    def test_variance_calculation(self, model, test_xs, scale, param_index, device, eps):
+        """Test that get_variance matches numerical variance calculation."""
+        degree = 3
+        params = np.ones(degree + 2) * -1e5
+        params[param_index] = 1e5
+        params = torch.tensor(params, device=device)
+        params[-1] = scale
+        
+        numerical_variance, precision = quad(lambda x: x**2 * model.pdf(torch.tensor(x), params).item(), -np.inf, np.inf)
+        
+        # Analytical variance from get_variance
+        analytical_variance = model.get_variance(params).item()
+        
+        assert abs(numerical_variance - analytical_variance) < eps, \
+            f"Variance mismatch for BLogistic: numerical={numerical_variance}, analytical={analytical_variance}"
 
 class TestNormalHead:
     """Test class for NormalHead PDF properties."""
