@@ -17,7 +17,7 @@ if root not in sys.path:
 from lib.utils import train_model, get_normalized_data, train_dist
 from lib.BLogistic import BLogistic, MixedBLogistic
 from lib.DistHead import NormalHead, StudentTHead, SkewedStudentTHead
-from lib.Michenkow import Michenkow, MichenkowManytoMany, AdjustedMichenkow
+from lib.Michenkow import MichenkowManytoMany, AdjustedMichenkow
 from lib.AttnLSTM import AttnLSTM
 # get command line arguments
 parser = argparse.ArgumentParser()
@@ -54,10 +54,10 @@ feature_size = args.num_features # features in order: returns, realized variance
 assert feature_size >= 1 and feature_size <= 3
 
 folder_path = root + "/MarketData/historical_data"
-train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys = get_normalized_data(folder_path, feature_size, device, 0.2, 0.2)
+train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path, feature_size, device, 0.2, 0.2)
 
 lr = 0.001
-decay_step = 200
+decay_step = 150
 decay_gamma = 0.5
 weight_decay = 0
 weight_decay = 0.000
@@ -69,15 +69,13 @@ architecture = AdjustedMichenkow
 model = architecture(dist_head, device, feature_size=feature_size)
 transfer_learning = True
 if transfer_learning:
-    #model = architecture(BLogistic(dof-2, device), device, feature_size=feature_size)
+    #base_model = architecture(dist_head, device, feature_size=feature_size)
     #state_dict = torch.load(root + "/MichenkowResults/BLogisticAttention/final_model.pth")
-    #model.load_state_dict(state_dict)
+    #base_model.load_state_dict(state_dict)
 
-    # transfer learning from base model
+    ## transfer learning from base model
     #with torch.no_grad():
-    #    base_params = base_model.fc.weight.data
-    #    #model.fc.weight.data = base_params
-    #    #model.fc.bias.data = base_model.fc.bias.data
+    #    model
     #    model.lstm1.weight_hh_l0.data = base_model.lstm1.weight_hh_l0.data
     #    model.lstm1.weight_ih_l0.data = base_model.lstm1.weight_ih_l0.data
     #    model.lstm2.weight_hh_l0.data = base_model.lstm2.weight_hh_l0.data

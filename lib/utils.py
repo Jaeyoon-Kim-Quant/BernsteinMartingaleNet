@@ -191,7 +191,7 @@ def get_full_sequence_data_by_day(folder_path, frac_dev, frac_test, force_recomp
         xs.append(data)
         total_rv.append(np.sum(data[:, 1]))
     xs = np.array(xs)
-    
+        
     np.random.seed(0)
     # bucket by total rv
     total_rv = np.array(total_rv)
@@ -228,11 +228,12 @@ def get_normalized_data(folder_path, feature_size, device, frac_dev, frac_test, 
         data = torch.tensor(data, device=device)
         xs = data[:, :-1, :feature_size]
         ys = data[:, 1:, 0]
-        return xs.clone(), ys.clone()
+        rv = data[:, 1:, 1]
+        return xs.clone(), ys.clone(), rv.clone()
 
-    train_xs, train_ys = parse_data(train, feature_size)
-    dev_xs, dev_ys = parse_data(dev, feature_size)
-    test_xs, test_ys = parse_data(test, feature_size)
+    train_xs, train_ys, train_rv = parse_data(train, feature_size)
+    dev_xs, dev_ys, dev_rv = parse_data(dev, feature_size)
+    test_xs, test_ys, test_rv = parse_data(test, feature_size)
 
     x_mean = train_xs.mean(dim=(0, 1))
     x_mean[0] = 0
@@ -243,7 +244,11 @@ def get_normalized_data(folder_path, feature_size, device, frac_dev, frac_test, 
     train_ys /= std_x[0]
     dev_ys /= std_x[0]
     test_ys /= std_x[0]
-    return train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys
+
+    train_rv /= std_x[0] ** 2
+    dev_rv /= std_x[0] ** 2
+    test_rv /= std_x[0] ** 2
+    return train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv
 
 def get_full_sequence_data_by_month(folder_path, num_dev_months, num_test_months, force_recompute=False):
     output_file_name = os.path.join(folder_path, f"spy_1min_full_context_by_month.npz")
