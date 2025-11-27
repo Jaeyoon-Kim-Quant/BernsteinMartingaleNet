@@ -26,18 +26,26 @@ class BLogistic(DistHead):
         self.degree = degree
         self.device = device if device is not None else torch.device('cpu')
         self.comb = torch.tensor([comb(self.degree, i) for i in range(self.degree + 1)], dtype=DT, device=self.device).reshape(1, -1)
-        self.mus = torch.tensor(self.get_mus(), dtype=DT, device=self.device)
+        self.mus = torch.tensor(self._init_mus(), dtype=DT, device=self.device)
+        self.to_variance = torch.tensor(self._init_variance(), dtype=DT, device=self.device)
     
     def num_params(self):
         return self.degree + 2
+    
+    def _get_harmonic_numbers(self, k):
+        return np.concatenate([[0], np.cumsum(1 / np.arange(1, self.degree+1) ** k)])
 
-    def get_mus(self):
-        harmonic_numbers = np.cumsum(1 / np.arange(1, self.degree+1))
-        harmonic_numbers = np.concatenate([[0], harmonic_numbers])
-        mus = np.zeros(self.degree+1)
-        for i in range(self.degree+1):
-            mus[i] = (harmonic_numbers[i] - harmonic_numbers[self.degree-i]) / (self.degree + 1)
+    def _init_mus(self):
+        harmonic_numbers = self._get_harmonic_numbers(1)
+        mus = (harmonic_numbers - harmonic_numbers[::-1]) / (self.degree + 1)
         return mus
+    
+    def _init_variance(self):
+        harmonic_numbers = self._get_harmonic_numbers(1)
+        harmonic_numbers2 = self._get_harmonic_numbers(2)
+        to_variance = (harmonic_numbers - harmonic_numbers[::-1]) ** 2 + np.pi ** 2 / 3 - (harmonic_numbers2 + harmonic_numbers2[::-1])
+        to_variance /= (self.degree + 1)
+        return to_variance
 
     def _process_input(self, xs, coeffs, raw_scale):
         normalized_coeffs = torch.softmax(coeffs, dim=-1) * (self.degree + 1)
@@ -100,6 +108,12 @@ class BLogistic(DistHead):
 
     def cdf(self, xs, combined_coeffs):
         raise NotImplementedError("CDF not implemented for BLogistic")
+
+    def get_variance(self, combined_coeffs):
+        coeffs, raw_scale = self._split_combined_coeffs(combined_coeffs)
+        normalized_coeffs = torch.softmax(coeffs, dim=-1) * (self.degree + 1)
+        scale = torch.nn.functional.softplus(raw_scale).reshape(-1, 1)
+        return scale ** 2 * (self.to_variance @ normalized_coeffs - (self.mus @ normalized_coeffs) ** 2)
 
 def get_ppf(blogistic, params, ps, max_scale=20, num_steps=100):
     scale = torch.nn.functional.softplus(params[1])

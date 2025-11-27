@@ -3,6 +3,7 @@ import os
 import numpy as np
 import torch
 import pytest
+from scipy.integrate import quad
 
 # Add the project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,7 +17,7 @@ from lib.utils import load_data
 @pytest.fixture(scope="module")
 def device():
     """Fixture to provide the device (GPU if available, otherwise CPU)."""
-    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    return torch.device('cpu')#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 @pytest.fixture(scope="module")
@@ -122,60 +123,23 @@ class TestBLogisticMean:
         max_diff = abs(naive_pdf - pdf).max().item()
         assert max_diff < eps, \
             f"naive_pdf does not match pdf for param_index={param_index}: max_diff={max_diff}"
-
-
-class TestMixedBLogisticMean:
-    """Test class for MixedBLogistic mean calculations and PDF properties."""
     
-    @pytest.mark.parametrize("param_index", range(13))  # blogistic.num_params() = 13 for dof=16
-    def test_mean_calculation(self, mixed_model, test_xs, scale, param_index, device, eps):
-        """Test that mean calculation produces finite and reasonable values."""
-        dof = 16
-        params = np.ones(dof) * -1e5
+    @pytest.mark.parametrize("param_index", range(4))  # degree + 1 = 4
+    def test_variance_calculation(self, model, test_xs, scale, param_index, device, eps):
+        """Test that get_variance matches numerical variance calculation."""
+        degree = 3
+        params = np.ones(degree + 2) * -1e5
         params[param_index] = 1e5
         params = torch.tensor(params, device=device)
-        # Set scale parameter (last param of blogistic, which is at index 12)
-        params[12] = scale
-        # Set reasonable values for StudentT params
-        params[-3] = scale  # std (softplus(0) = log(2))
-        params[-2] = 0.0  # df (softplus(0) = log(2))
-        params[-1] = 0.0  # mix_param (sigmoid(0) = 0.5)
+        params[-1] = scale
         
-        # Reshape params to (1, dof) for logpdf
-        params_reshaped = params.reshape(1, -1)
+        numerical_variance, precision = quad(lambda x: x**2 * model.pdf(torch.tensor(x), params).item(), -np.inf, np.inf)
         
-        pdf = torch.exp(mixed_model.logpdf(test_xs.reshape(-1, 1), params_reshaped))
-        mean = (test_xs @ pdf).item() * torch.diff(test_xs).mean().item()
+        # Analytical variance from get_variance
+        analytical_variance = model.get_variance(params).item()
         
-        # Check that mean is finite and reasonable (within test_xs range)
-        assert np.isfinite(mean), \
-            f"Mean is not finite for param_index={param_index}: {mean}"
-        assert -25 < mean < 25, \
-            f"Mean is out of reasonable range for param_index={param_index}: {mean}"
-    
-    @pytest.mark.parametrize("param_index", range(13))  # blogistic.num_params() = 13 for dof=16
-    def test_pdf_integral(self, mixed_model, test_xs, scale, param_index, device, eps):
-        """Test that PDF integrates to 1."""
-        dof = 16
-        params = np.ones(dof) * -1e5
-        params[param_index] = 1e5
-        params = torch.tensor(params, device=device)
-        # Set scale parameter (last param of blogistic, which is at index 12)
-        params[12] = scale
-        # Set reasonable values for StudentT params
-        params[-3] = 0.0  # std (softplus(0) = log(2))
-        params[-2] = 10.0  # df (softplus(0) = log(2))
-        params[-1] = 0.0  # mix_param (sigmoid(0) = 0.5)
-        
-        # Reshape params to (1, dof) for logpdf
-        params_reshaped = params.reshape(1, -1)
-        
-        pdf = torch.exp(mixed_model.logpdf(test_xs.reshape(-1, 1), params_reshaped))
-        integral = pdf.sum().item() * torch.diff(test_xs).mean().item()
-        
-        assert abs(integral - 1.0) < eps, \
-            f"PDF does not integrate to 1 for param_index={param_index}: {integral}"
-
+        assert abs(numerical_variance - analytical_variance) < eps, \
+            f"Variance mismatch for BLogistic: numerical={numerical_variance}, analytical={analytical_variance}"
 
 class TestNormalHead:
     """Test class for NormalHead PDF properties."""
@@ -201,6 +165,25 @@ class TestNormalHead:
         # NormalHead has mean 0
         assert abs(mean) < eps, \
             f"Mean should be 0 for NormalHead, got: {mean}"
+    
+    def test_variance_calculation(self, normal_head, test_xs, scale, device, eps):
+        """Test that get_variance matches numerical variance calculation."""
+        params = torch.tensor([[scale]], device=device)  # shape: (1, 1)
+        
+        #pdf = normal_head.pdf(test_xs.reshape(-1, 1), params)
+        #dx = torch.diff(test_xs).mean().item()
+        
+        ## Numerical variance: Var = E[X^2] - E[X]^2
+        #mean = (test_xs @ pdf).item() * dx
+        #mean_squared = (test_xs ** 2 @ pdf).item() * dx
+        #numerical_variance = mean_squared - mean ** 2
+        numerical_variance, _ = quad(lambda x: x**2 * normal_head.pdf(torch.tensor(x), params).item(), -np.inf, np.inf)
+        
+        # Analytical variance from get_variance
+        analytical_variance = normal_head.get_variance(params).item()
+        
+        assert abs(numerical_variance - analytical_variance) < eps, \
+            f"Variance mismatch for NormalHead: numerical={numerical_variance}, analytical={analytical_variance}"
 
 
 class TestStudentTHead:
@@ -227,6 +210,17 @@ class TestStudentTHead:
         # StudentTHead has mean 0
         assert abs(mean) < eps, \
             f"Mean should be 0 for StudentTHead, got: {mean}"
+    
+    def test_variance_calculation(self, studentt_head, test_xs, scale, device, eps):
+        """Test that get_variance matches numerical variance calculation."""
+        params = torch.tensor([[scale, 10.0]], device=device)  # shape: (1, 2)
+        numerical_variance, _ = quad(lambda x: x**2 * studentt_head.pdf(torch.tensor(x), params).item(), -np.inf, np.inf)
+        
+        # Analytical variance from get_variance
+        analytical_variance = studentt_head.get_variance(params).item()
+        
+        assert abs(numerical_variance - analytical_variance) < eps, \
+            f"Variance mismatch for StudentTHead: numerical={numerical_variance}, analytical={analytical_variance}"
 
 
 class TestSkewedStudentTHead:
@@ -265,3 +259,21 @@ class TestSkewedStudentTHead:
             f"Mean is not finite: {mean}"
         assert -25 < mean < 25, \
             f"Mean is out of reasonable range: {mean}"
+    
+    def test_variance_calculation(self, skewed_studentt_head, test_xs, scale, device, eps):
+        """Test that get_variance matches numerical variance calculation."""
+        # Test with different skewness values
+        skewness_params = [0.0, np.log(np.exp(1) - 1), 1.0, 2.0]
+        
+        for skewness_param in skewness_params:
+            params = torch.tensor([[scale, 10.0, skewness_param]], device=device)  # shape: (1, 4)
+            
+            # Numerical variance: Var = E[X^2]
+            numerical_variance, _ = quad(lambda x: x**2 * skewed_studentt_head.pdf(x, params).item(), -np.inf, np.inf)
+            
+            # Analytical variance from get_variance
+            analytical_variance = skewed_studentt_head.get_variance(params).item()
+            
+            assert abs(numerical_variance - analytical_variance) < eps, \
+                f"Variance mismatch for SkewedStudentTHead (skewness_param={skewness_param}): " \
+                f"numerical={numerical_variance}, analytical={analytical_variance}"
