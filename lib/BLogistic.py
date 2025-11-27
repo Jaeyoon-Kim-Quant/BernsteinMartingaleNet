@@ -113,7 +113,7 @@ class BLogistic(DistHead):
         coeffs, raw_scale = self._split_combined_coeffs(combined_coeffs)
         normalized_coeffs = torch.softmax(coeffs, dim=-1) * (self.degree + 1)
         scale = torch.nn.functional.softplus(raw_scale).reshape(-1, 1)
-        return scale ** 2 * (self.to_variance @ normalized_coeffs - (self.mus @ normalized_coeffs) ** 2)
+        return scale ** 2 * ((normalized_coeffs @ self.to_variance).reshape(-1, 1) - (normalized_coeffs @ self.mus).reshape(-1, 1) ** 2)
 
 def get_ppf(blogistic, params, ps, max_scale=20, num_steps=100):
     scale = torch.nn.functional.softplus(params[1])
