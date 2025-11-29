@@ -40,7 +40,7 @@ parser = argparse.ArgumentParser()
 args = parser.parse_args(args=[])
 # override manually
 
-args.dist_type = "StudentT" #"SkewedStudentT" #"BLogistic" #"SkewedStudentT" #StudentT Normal #SkewedStudentT #BLogistic
+args.dist_type = "SkewedStudentT" #"SkewedStudentT" #"BLogistic" #"SkewedStudentT" #StudentT Normal #SkewedStudentT #BLogistic
 args.dist_param = "16"
 
 
@@ -100,7 +100,7 @@ candidate_layer_sizes = [
     [32, 16],
 ]
 
-for feature_size in [1, 2, 3]:
+for feature_size in [1, 2]:
 
     train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path,
                                                                                                           feature_size,
