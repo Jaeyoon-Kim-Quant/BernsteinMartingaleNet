@@ -27,6 +27,17 @@ parser.add_argument("-p","--dist_param", type=str, default="")
 parser.add_argument("-f","--num_features", type=int, default=3)
 args = parser.parse_args()
 
+def set_seed(seed=42):
+    """Set all random seeds for reproducibility"""
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+set_seed(42)
+
 assert torch.cuda.is_available()
 device = torch.device('cuda')
 
@@ -67,7 +78,7 @@ batch_size = 1024
 #model = MichenkowManytoMany(dist_head, device, feature_size=feature_size)
 architecture = AdjustedMichenkow
 model = architecture(dist_head, device, feature_size=feature_size)
-transfer_learning = True
+transfer_learning = False
 if transfer_learning:
     #base_model = architecture(dist_head, device, feature_size=feature_size)
     #state_dict = torch.load(root + "/MichenkowResults/BLogisticAttention/final_model.pth")

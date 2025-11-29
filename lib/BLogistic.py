@@ -67,17 +67,22 @@ class BLogistic(DistHead):
         return coeffs, raw_scale
 
     def logpdf(self, xs, combined_coeffs):
+
         coeffs, raw_scale = self._split_combined_coeffs(combined_coeffs)
 
         shifted_xs, normalized_coeffs, Fx, scale = self._process_input(xs, coeffs, raw_scale)
+
         powers = torch.arange(0, self.degree+1, dtype=DT, device=self.device)
         reversed_powers = torch.arange(self.degree, -1, -1, dtype=DT, device=self.device)
         log_fprime = - shifted_xs - 2 * torch.nn.functional.softplus(-shifted_xs) - torch.log(scale)
         log_u_p = -torch.nn.functional.softplus(-shifted_xs) * powers.reshape(1, -1)
         log_u_m = -torch.nn.functional.softplus(shifted_xs) * reversed_powers.reshape(1, -1)
         log_bernstein_poly = log_u_p + log_u_m + torch.log(self.comb)
-        log_poly = torch.logsumexp(torch.log(normalized_coeffs) + log_bernstein_poly, dim=-1).reshape(-1, 1)
+
+        #log_poly = torch.logsumexp(torch.log(normalized_coeffs) + log_bernstein_poly, dim=-1).reshape(-1, 1)
+
         log_poly = torch.logsumexp(coeffs + log_bernstein_poly, dim=-1).reshape(-1, 1) - torch.logsumexp(coeffs, dim=-1).reshape(-1, 1) + torch.log(torch.tensor(self.degree + 1, dtype=DT, device=self.device))
+
         return log_poly + log_fprime
 
     def naive_pdf(self, xs, combined_coeffs):
