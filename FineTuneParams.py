@@ -17,24 +17,10 @@ if root not in sys.path:
 from lib.utils import train_model, get_normalized_data, train_dist
 from lib.BLogistic import BLogistic, MixedBLogistic
 from lib.DistHead import NormalHead, StudentTHead, SkewedStudentTHead
-from lib.Michenkow import MichenkowManytoMany, AdjustedMichenkow
-from lib.AttnLSTM import AttnLSTM
-# get command line arguments
-# parser = argparse.ArgumentParser()
-# parser.add_argument("-o","--output_folder", type=str)
-# parser.add_argument("-d","--dist_type", type=str)
-# parser.add_argument("-p","--dist_param", type=str, default="")
-# parser.add_argument("-f","--num_features", type=int, default=3)
-# args = parser.parse_args()
+from lib.Michenkow import AdjustedMichenkow
 
 parser = argparse.ArgumentParser()
 args = parser.parse_args(args=[])
-# override manually
-
-args.dist_type = "BLogistic" #"SkewedStudentT" #"BLogistic" #"SkewedStudentT" #StudentT Normal #SkewedStudentT #BLogistic
-args.output_folder = f"MichenkowResults/{args.dist_type}NoReg"
-args.dist_param = "16 "
-args.num_features = 1
 
 assert torch.cuda.is_available()
 device = torch.device('cuda')
