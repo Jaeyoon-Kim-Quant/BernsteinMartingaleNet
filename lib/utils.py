@@ -363,10 +363,10 @@ def train_model(
     lr_decay_step=200,    # every N steps to decay learning rate
     lr_decay_gamma=0.5,   # decay factor
     keep_checkpoints=False,
+    only_dev_loss = False
 ):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    # Add learning rate scheduler
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_decay_step, gamma=lr_decay_gamma)
 
     if batch_size is None:
@@ -383,7 +383,7 @@ def train_model(
         model.eval()
         with torch.no_grad():
             all_losses = []
-            use_naive_pdf = getattr(model, 'use_naive_pdf', False)
+            # use_naive_pdf = getattr(model, 'use_naive_pdf', False)
             for i in range(0, X.shape[0], batch_size):
                 batch_X = X[i:i+batch_size, :]
                 batch_Y = Y[i:i+batch_size, :]
@@ -399,9 +399,31 @@ def train_model(
             loss_mean = torch.mean(all_losses).item()
             return loss_mean, loss_std * np.sqrt(1 / len(all_losses))
 
-    train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
-    dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
+    def eval_loss_vectorized(X, Y):
+        model.eval()
+        with torch.no_grad():
+            X = X.to(device)
+            Y = Y.to(device)
+
+            params = model.get_params(X)
+
+            individual_losses = -model.dist_head.logpdf(
+                Y.reshape(-1, 1),
+                params.reshape(-1, params.shape[-1])
+            )
+
+            loss_mean = individual_losses.mean().item()
+            loss_std = individual_losses.std(unbiased=False).item() / np.sqrt(len(individual_losses))
+
+            return loss_mean, loss_std
+
+    train_loss, train_loss_std = eval_loss_vectorized(train_X, train_Y)
+    dev_loss, dev_loss_std = eval_loss_vectorized(dev_X, dev_Y)
     get_confidence_interval = lambda loss, loss_std: f"confidence interval: ({loss - 1.96 * loss_std:.4f}, {loss + 1.96 * loss_std:.4f})"
+
+    best_dev_so_far = dev_loss
+    best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
     if verbose:
         print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, "
               f"Dev Loss confidence interval: {get_confidence_interval(dev_loss, dev_loss_std)}")
@@ -432,11 +454,16 @@ def train_model(
         #print(f"Step {step}, Total Loss: {total_loss / train_X.shape[0]:.4f}")
 
         if step % 10 == 0:
-            train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
-            dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
+            train_loss, train_loss_std = eval_loss_vectorized(train_X, train_Y)
+            dev_loss, dev_loss_std = eval_loss_vectorized(dev_X, dev_Y)
             train_losses.append(train_loss)
             dev_losses.append(dev_loss)
             loss_steps.append(step)
+
+            if dev_loss < best_dev_so_far:
+                best_dev_so_far = dev_loss
+                best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
             if output_folder is not None:
                 # save model
                 torch.save(model.state_dict(), os.path.join(output_folder, f"model_{step}.pth"))
@@ -447,38 +474,41 @@ def train_model(
                       f"Dev Loss confidence interval: {get_confidence_interval(dev_loss, dev_loss_std)}, LR: {current_lr:.6f}")
 
     # save losses to csv
-    df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
-    df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
-    # save hyperparameters to json
-    with open(os.path.join(output_folder, "hyperparameters.json"), "w") as f:
-        json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size, "lr_decay_step": lr_decay_step, "lr_decay_gamma": lr_decay_gamma}, f)
-    # implement early stopping
-    best_dev_loss_idx = np.argmin(df["dev_loss"])
-    best_epoch = int(df.iloc[best_dev_loss_idx]["epoch"])
-    print(f"Best epoch: {best_epoch}")
-    model_path = f"model_{best_epoch}.pth"
-    model_state_dict = torch.load(os.path.join(output_folder, model_path))
-    model.load_state_dict(model_state_dict)
-    model.to(device)
-    # evaluate model on test data
-    final_train_loss, final_train_loss_std = eval_loss(train_X, train_Y, batch_size)
-    final_dev_loss, final_dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
-    test_loss, test_loss_std = eval_loss(test_X, test_Y, batch_size)
-    print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {get_confidence_interval(final_train_loss, final_train_loss_std)}")
-    print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {get_confidence_interval(final_dev_loss, final_dev_loss_std)}")
-    print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {get_confidence_interval(test_loss, test_loss_std)}")
-    # save final losses to csv
 
-    final_df = pd.DataFrame({"data_type": ["train", "dev", "test"], "loss": [final_train_loss, final_dev_loss, test_loss], "loss_std": [final_train_loss_std, final_dev_loss_std, test_loss_std]})
-    final_df.to_csv(os.path.join(output_folder, "final_losses.csv"), index=False)
+    df = pd.DataFrame({"epoch": loss_steps, "train_loss": train_losses, "dev_loss": dev_losses})
 
     if output_folder is not None:
-        # save model
+        df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
+        # save hyperparameters to json
+        with open(os.path.join(output_folder, "hyperparameters.json"), "w") as f:
+            json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size, "lr_decay_step": lr_decay_step, "lr_decay_gamma": lr_decay_gamma}, f)
+
+    # implement early stopping
+    model.load_state_dict(best_state_dict)
+
+    model.to(device)
+    # evaluate model on test data
+    final_train_loss, final_train_loss_std = eval_loss_vectorized(train_X, train_Y)
+    final_dev_loss, final_dev_loss_std = eval_loss_vectorized(dev_X, dev_Y)
+    test_loss, test_loss_std = eval_loss_vectorized(test_X, test_Y)
+
+    if verbose:
+        print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {get_confidence_interval(final_train_loss, final_train_loss_std)}")
+        print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {get_confidence_interval(final_dev_loss, final_dev_loss_std)}")
+        print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {get_confidence_interval(test_loss, test_loss_std)}")
+
+    final_df = pd.DataFrame({"data_type": ["train", "dev", "test"], "loss": [final_train_loss, final_dev_loss, test_loss], "loss_std": [final_train_loss_std, final_dev_loss_std, test_loss_std]})
+
+    if output_folder is not None:
+        final_df.to_csv(os.path.join(output_folder, "final_losses.csv"), index=False)
         torch.save(model.state_dict(), os.path.join(output_folder, f"final_model.pth"))
-    
-    add_loss_plot(df, os.path.join(output_folder, "losses.png"))
-    if not keep_checkpoints:
+        add_loss_plot(df, os.path.join(output_folder, "losses.png"))
+
+    if not keep_checkpoints and output_folder is not None:
         for file in glob.glob(os.path.join(output_folder, "model_*.pth")):
             os.remove(file)
 
-    return model, train_losses, dev_losses
+    if only_dev_loss:
+        return final_dev_loss
+    else:
+        return model, train_losses, dev_losses

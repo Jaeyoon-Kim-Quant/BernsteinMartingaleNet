@@ -33,8 +33,20 @@ args = parser.parse_args(args=[])
 
 args.dist_type = "BLogistic" #"SkewedStudentT" #"BLogistic" #"SkewedStudentT" #StudentT Normal #SkewedStudentT #BLogistic
 args.output_folder = f"MichenkowResults/{args.dist_type}NoReg"
-args.dist_param = "16 "
+args.dist_param = "16"
 args.num_features = 1
+
+def set_seed(seed=42):
+    """Set all random seeds for reproducibility"""
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # for multi-GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+# Set seed before anything else
+set_seed(42)  # or any other seed value
 
 assert torch.cuda.is_available()
 device = torch.device('cuda')

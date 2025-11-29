@@ -73,12 +73,13 @@ class MichenkowManytoMany(nn.Module):
         return torch.exp(self.get_logpdf(x, sample_xs))
 
 class AdjustedMichenkow(nn.Module):
-    def __init__(self, dist_head, device, feature_size=1):
+    def __init__(self, dist_head, device, feature_size=1, layer_sizes=(128, 64, 32), dropout_ratio=0.2):
         super().__init__()
         self.dist_head      = dist_head
         self.device         = device
         self.feature_size   = feature_size
-        self.layer_sizes    = [128, 64, 32]
+        self.layer_sizes    = list(layer_sizes)
+        self.dropout_ratio  = dropout_ratio
         self.layer_norm = True
 
         print(f"\nInitializing LSTM with dist={dist_head.__class__.__name__}, dof={dist_head.num_params()}")
@@ -109,7 +110,7 @@ class AdjustedMichenkow(nn.Module):
 
             in_dim = h_dim
 
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(self.dropout_ratio)
 
         self.fc = nn.Linear(self.layer_sizes[-1], dist_head.num_params())
         nn.init.zeros_(self.fc.bias)
