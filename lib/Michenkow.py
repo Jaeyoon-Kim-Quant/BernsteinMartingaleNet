@@ -9,8 +9,7 @@ class MichenkowManytoMany(nn.Module):
         self.dist_head      = dist_head
         self.device         = device
         self.feature_size   = feature_size
-        #self.layer_sizes    = [128, 64, 32]
-        self.layer_sizes    = [256, 128, 64]
+        self.layer_sizes    = [128, 64, 32]
 
         print(f"\nInitializing LSTM with dist={dist_head.__class__.__name__}, dof={dist_head.num_params()}")
 

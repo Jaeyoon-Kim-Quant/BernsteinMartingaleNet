@@ -62,50 +62,21 @@ else:
     raise ValueError(f"Invalid dist type: {args.dist_type}")
 
 feature_size = args.num_features # features in order: returns, realized variance, time
+print(f"Feature size: {feature_size}")
 assert feature_size >= 1 and feature_size <= 3
 
 folder_path = root + "/MarketData/historical_data"
 train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path, feature_size, device, 0.2, 0.2)
 
-lr = 0.001
-decay_step = 150
-decay_gamma = 0.5
-weight_decay = 0
+lr = 0.002
 weight_decay = 0.000
-num_steps = 400 + 1
+num_steps = 800 + 1
 batch_size = 1024
 
 #model = MichenkowManytoMany(dist_head, device, feature_size=feature_size)
 architecture = AdjustedMichenkow
+#architecture = MichenkowManytoMany
 model = architecture(dist_head, device, feature_size=feature_size)
-transfer_learning = False
-if transfer_learning:
-    #base_model = architecture(dist_head, device, feature_size=feature_size)
-    #state_dict = torch.load(root + "/MichenkowResults/BLogisticAttention/final_model.pth")
-    #base_model.load_state_dict(state_dict)
-
-    ## transfer learning from base model
-    #with torch.no_grad():
-    #    model
-    #    model.lstm1.weight_hh_l0.data = base_model.lstm1.weight_hh_l0.data
-    #    model.lstm1.weight_ih_l0.data = base_model.lstm1.weight_ih_l0.data
-    #    model.lstm2.weight_hh_l0.data = base_model.lstm2.weight_hh_l0.data
-    #    model.lstm2.weight_ih_l0.data = base_model.lstm2.weight_ih_l0.data
-    #    model.lstm3.weight_hh_l0.data = base_model.lstm3.weight_hh_l0.data
-    #    model.lstm3.weight_ih_l0.data = base_model.lstm3.weight_ih_l0.data
-    #freeze lstm layers
-    #for param in model.lstm1.parameters():
-    #    param.requires_grad = False
-    #for param in model.lstm2.parameters():
-    #    param.requires_grad = False
-    #for param in model.lstm3.parameters():
-    #    param.requires_grad = False
-
-    iid_xs = train_xs[:, :, 0].flatten()
-    new_params = train_dist(dist_head, iid_xs, 0.1, 500, device)
-    with torch.no_grad():
-        model.fc.bias.copy_(new_params.flatten())
-
 model, train_losses, dev_losses = train_model(model, train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys,
                                               lr, weight_decay, num_steps, batch_size=batch_size, device=device,
-                                              output_folder=args.output_folder, lr_decay_step=decay_step, lr_decay_gamma=decay_gamma)
+                                              output_folder=args.output_folder)

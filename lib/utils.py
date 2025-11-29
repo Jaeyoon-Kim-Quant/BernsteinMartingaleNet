@@ -360,14 +360,12 @@ def train_model(
     device: torch.device = None, 
     verbose=True, 
     output_folder=None,
-    lr_decay_step=200,    # every N steps to decay learning rate
-    lr_decay_gamma=0.5,   # decay factor
     keep_checkpoints=False,
     only_dev_loss = False
 ):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_decay_step, gamma=lr_decay_gamma)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_steps, eta_min=lr * 0.1)
 
     if batch_size is None:
         batch_size = train_X.shape[0]
@@ -422,13 +420,6 @@ def train_model(
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        #model.train()
-        #total_loss = 0.0
-        #loss = model(train_X, train_Y)
-        #total_loss += loss.item() * train_X.shape[0]
-        #optimizer.zero_grad()
-        #loss.backward()
-        #optimizer.step()
 
         # Step learning rate decay after each step
         scheduler.step()
@@ -463,16 +454,16 @@ def train_model(
         df.to_csv(os.path.join(output_folder, "losses.csv"), index=False)
         # save hyperparameters to json
         with open(os.path.join(output_folder, "hyperparameters.json"), "w") as f:
-            json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size, "lr_decay_step": lr_decay_step, "lr_decay_gamma": lr_decay_gamma}, f)
+            json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size}, f)
 
     # implement early stopping
     model.load_state_dict(best_state_dict)
 
     model.to(device)
     # evaluate model on test data
-    final_train_loss, final_train_loss_std = eval_loss_vectorized(train_X, train_Y)
-    final_dev_loss, final_dev_loss_std = eval_loss_vectorized(dev_X, dev_Y)
-    test_loss, test_loss_std = eval_loss_vectorized(test_X, test_Y)
+    final_train_loss, final_train_loss_std = eval_loss(train_X, train_Y, batch_size)
+    final_dev_loss, final_dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
+    test_loss, test_loss_std = eval_loss(test_X, test_Y, batch_size)
 
     if verbose:
         print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {get_confidence_interval(final_train_loss, final_train_loss_std)}")
