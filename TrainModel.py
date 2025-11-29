@@ -20,33 +20,23 @@ from lib.DistHead import NormalHead, StudentTHead, SkewedStudentTHead
 from lib.Michenkow import MichenkowManytoMany, AdjustedMichenkow
 from lib.AttnLSTM import AttnLSTM
 # get command line arguments
-# parser = argparse.ArgumentParser()
-# parser.add_argument("-o","--output_folder", type=str)
-# parser.add_argument("-d","--dist_type", type=str)
-# parser.add_argument("-p","--dist_param", type=str, default="")
-# parser.add_argument("-f","--num_features", type=int, default=3)
-# args = parser.parse_args()
-
 parser = argparse.ArgumentParser()
-args = parser.parse_args(args=[])
-# override manually
-
-args.dist_type = "BLogistic" #"SkewedStudentT" #"BLogistic" #"SkewedStudentT" #StudentT Normal #SkewedStudentT #BLogistic
-args.output_folder = f"MichenkowResults/{args.dist_type}NoReg"
-args.dist_param = "16"
-args.num_features = 1
+parser.add_argument("-o","--output_folder", type=str)
+parser.add_argument("-d","--dist_type", type=str)
+parser.add_argument("-p","--dist_param", type=str, default="")
+parser.add_argument("-f","--num_features", type=int, default=3)
+args = parser.parse_args()
 
 def set_seed(seed=42):
     """Set all random seeds for reproducibility"""
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # for multi-GPU
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-# Set seed before anything else
-set_seed(42)  # or any other seed value
+set_seed(42)
 
 assert torch.cuda.is_available()
 device = torch.device('cuda')
@@ -75,8 +65,7 @@ feature_size = args.num_features # features in order: returns, realized variance
 assert feature_size >= 1 and feature_size <= 3
 
 folder_path = root + "/MarketData/historical_data"
-train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path, feature_size, device, 0.2, 0.2,
-                                                                                                      force_recompute=True)
+train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path, feature_size, device, 0.2, 0.2)
 
 lr = 0.001
 decay_step = 150

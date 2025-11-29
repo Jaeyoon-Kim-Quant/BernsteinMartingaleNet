@@ -399,26 +399,8 @@ def train_model(
             loss_mean = torch.mean(all_losses).item()
             return loss_mean, loss_std * np.sqrt(1 / len(all_losses))
 
-    def eval_loss_vectorized(X, Y):
-        model.eval()
-        with torch.no_grad():
-            X = X.to(device)
-            Y = Y.to(device)
-
-            params = model.get_params(X)
-
-            individual_losses = -model.dist_head.logpdf(
-                Y.reshape(-1, 1),
-                params.reshape(-1, params.shape[-1])
-            )
-
-            loss_mean = individual_losses.mean().item()
-            loss_std = individual_losses.std(unbiased=False).item() / np.sqrt(len(individual_losses))
-
-            return loss_mean, loss_std
-
-    train_loss, train_loss_std = eval_loss_vectorized(train_X, train_Y)
-    dev_loss, dev_loss_std = eval_loss_vectorized(dev_X, dev_Y)
+    train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
+    dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
     get_confidence_interval = lambda loss, loss_std: f"confidence interval: ({loss - 1.96 * loss_std:.4f}, {loss + 1.96 * loss_std:.4f})"
 
     best_dev_so_far = dev_loss
@@ -454,8 +436,8 @@ def train_model(
         #print(f"Step {step}, Total Loss: {total_loss / train_X.shape[0]:.4f}")
 
         if step % 10 == 0:
-            train_loss, train_loss_std = eval_loss_vectorized(train_X, train_Y)
-            dev_loss, dev_loss_std = eval_loss_vectorized(dev_X, dev_Y)
+            train_loss, train_loss_std = eval_loss(train_X, train_Y, batch_size)
+            dev_loss, dev_loss_std = eval_loss(dev_X, dev_Y, batch_size)
             train_losses.append(train_loss)
             dev_losses.append(dev_loss)
             loss_steps.append(step)
