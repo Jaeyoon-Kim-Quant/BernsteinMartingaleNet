@@ -3,7 +3,7 @@ import torch.nn as nn
 
 # implements the Michenkow model from the paper "Forecasting Probability Distributions of Financial Returns with Deep Neural"
 # https://arxiv.org/pdf/2508.18921
-class MichenkowManytoMany(nn.Module):
+class Michenkow(nn.Module):
     def __init__(self, dist_head, device, feature_size=1):
         super().__init__()
         self.dist_head      = dist_head
@@ -11,7 +11,7 @@ class MichenkowManytoMany(nn.Module):
         self.feature_size   = feature_size
         self.layer_sizes    = [128, 64, 32]
 
-        print(f"\nInitializing LSTM with dist={dist_head.__class__.__name__}, dof={dist_head.num_params()}")
+        print(f"\nInitializing Michenkow with dist={dist_head.__class__.__name__}, dof={dist_head.num_params()}")
 
         # LSTM layers (3 layers with decreasing neurons: 128 -> 64 -> 32)
         self.lstm1 = nn.LSTM(
@@ -81,7 +81,7 @@ class AdjustedMichenkow(nn.Module):
         self.dropout_ratio  = dropout_ratio
         self.layer_norm = True
 
-        print(f"\nInitializing LSTM with dist={dist_head.__class__.__name__}, dof={dist_head.num_params()}")
+        print(f"\nInitializing AdjustedMichenkow with dist={dist_head.__class__.__name__}, dof={dist_head.num_params()}")
         self.lstms = nn.ModuleList()
         self.projs = nn.ModuleList()
         self.norms = nn.ModuleList() if self.layer_norm else None
