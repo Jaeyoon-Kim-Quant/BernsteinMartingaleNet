@@ -75,18 +75,18 @@ else:
 folder_path = root + "/MarketData/historical_data"
 train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path, feature_size, device, 0.2, 0.2)
 
-# add data perterbation
+# add data perturbation
 noise = 0.001
 noise = torch.tensor(noise, device=device)
-num_perterbations = 4
+num_perturbations = 4
 synthetic_train_xs = []
-for i in range(num_perterbations):
+for i in range(num_perturbations):
     new_xs = train_xs.clone()
     new_xs[:, :, :2] = new_xs[:, :, :2] * torch.sqrt(1 - noise) + torch.randn_like(new_xs[:, :, :2]) * torch.sqrt(noise)
     synthetic_train_xs.append(new_xs)
 synthetic_train_xs = torch.concat(synthetic_train_xs, dim=0)
 
-synthetic_train_ys = torch.concat([train_ys.clone() for i in range(num_perterbations)], dim=0)
+synthetic_train_ys = torch.concat([train_ys.clone() for i in range(num_perturbations)], dim=0)
 total_train_xs = torch.concat([train_xs, synthetic_train_xs], dim=0)
 total_train_ys = torch.concat([train_ys, synthetic_train_ys], dim=0)
 #shuffle total_train_xs and total_train_ys
