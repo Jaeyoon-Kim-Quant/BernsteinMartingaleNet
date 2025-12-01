@@ -75,12 +75,33 @@ else:
 folder_path = root + "/MarketData/historical_data"
 train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path, feature_size, device, 0.2, 0.2)
 
+# add data perterbation
+noise = 0.001
+noise = torch.tensor(noise, device=device)
+num_perterbations = 4
+synthetic_train_xs = []
+for i in range(num_perterbations):
+    new_xs = train_xs.clone()
+    new_xs[:, :, :2] = new_xs[:, :, :2] * torch.sqrt(1 - noise) + torch.randn_like(new_xs[:, :, :2]) * torch.sqrt(noise)
+    synthetic_train_xs.append(new_xs)
+synthetic_train_xs = torch.concat(synthetic_train_xs, dim=0)
+
+synthetic_train_ys = torch.concat([train_ys.clone() for i in range(num_perterbations)], dim=0)
+total_train_xs = torch.concat([train_xs, synthetic_train_xs], dim=0)
+total_train_ys = torch.concat([train_ys, synthetic_train_ys], dim=0)
+#shuffle total_train_xs and total_train_ys
+indices = torch.randperm(total_train_xs.shape[0])
+total_train_xs = total_train_xs[indices]
+total_train_ys = total_train_ys[indices]
+
+print("total_train_xs.shape", total_train_xs.shape)
+
 lr = 0.002
 weight_decay = 0.000
 num_steps = 800 + 1
 batch_size = 1024
 
 model = architecture(dist_head, device, feature_size=feature_size)
-model, train_losses, dev_losses = train_model(model, train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys,
+model, train_losses, dev_losses = train_model(model, total_train_xs, total_train_ys, dev_xs, dev_ys, test_xs, test_ys,
                                               lr, weight_decay, num_steps, batch_size=batch_size, device=device,
-                                              output_folder=args.output_folder, verbose=False)
+                                              output_folder=args.output_folder, verbose=True)

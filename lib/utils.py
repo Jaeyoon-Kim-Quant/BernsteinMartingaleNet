@@ -402,7 +402,8 @@ def train_model(
     get_confidence_interval = lambda loss, loss_std: f"confidence interval: ({loss - 1.96 * loss_std:.4f}, {loss + 1.96 * loss_std:.4f})"
 
     best_dev_so_far = dev_loss
-    best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+    best_step = 0
+    counter = 0
 
     if verbose:
         print(f"Init, Train Loss: {train_loss:.4f}, Dev Loss: {dev_loss:.4f}, "
@@ -435,7 +436,14 @@ def train_model(
 
             if dev_loss < best_dev_so_far:
                 best_dev_so_far = dev_loss
-                best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                best_step = step
+                #best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                counter = 0
+            else:
+                counter += 1
+                if counter > 10:
+                    print("early stopping at step", step)
+                    break
 
             if output_folder is not None:
                 # save model
@@ -457,7 +465,8 @@ def train_model(
             json.dump({"lr": lr, "weight_decay": weight_decay, "num_steps": num_steps, "batch_size": batch_size}, f)
 
     # implement early stopping
-    model.load_state_dict(best_state_dict)
+    #model.load_state_dict(best_state_dict)
+    model.load_state_dict(torch.load(os.path.join(output_folder, f"model_{best_step}.pth")))
 
     model.to(device)
     # evaluate model on test data
@@ -466,6 +475,7 @@ def train_model(
     test_loss, test_loss_std = eval_loss(test_X, test_Y, batch_size)
 
     if verbose:
+        print(f"Best step: {best_step}")
         print(f"Final Train Loss: {final_train_loss:.4f}, Final Train Loss confidence interval: {get_confidence_interval(final_train_loss, final_train_loss_std)}")
         print(f"Final Dev Loss: {final_dev_loss:.4f}, Final Dev Loss confidence interval: {get_confidence_interval(final_dev_loss, final_dev_loss_std)}")
         print(f"Test Loss: {test_loss:.4f}, Test Loss confidence interval: {get_confidence_interval(test_loss, test_loss_std)}")
