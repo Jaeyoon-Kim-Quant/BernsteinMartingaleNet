@@ -41,8 +41,7 @@ args = parser.parse_args(args=[])
 # override manually
 
 args.dist_type = "BLogistic" #"SkewedStudentT" #"BLogistic" #"SkewedStudentT" #StudentT Normal #SkewedStudentT #BLogistic
-args.dist_param = "64"
-
+args.dist_param = "32"
 
 def set_seed(seed=42):
 
