@@ -17,14 +17,6 @@ from lib.utils import train_model, get_normalized_data
 from lib.BLogistic import BLogistic, MixedBLogistic
 from lib.DistHead import NormalHead, StudentTHead, SkewedStudentTHead
 from lib.Michenkow import AdjustedMichenkow
-from lib.AttnLSTM import AttnLSTM
-# get command line arguments
-# parser = argparse.ArgumentParser()
-# parser.add_argument("-o","--output_folder", type=str)
-# parser.add_argument("-d","--dist_type", type=str)
-# parser.add_argument("-p","--dist_param", type=str, default="")
-# parser.add_argument("-f","--num_features", type=int, default=3)
-# args = parser.parse_args()
 
 def _output_folder_name(num_features):
     if num_features == 1:

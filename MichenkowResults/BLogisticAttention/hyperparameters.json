@@ -1,1 +1,0 @@
-{"lr": 0.002, "weight_decay": 0.0, "num_steps": 401, "batch_size": 32, "lr_decay_step": 200, "lr_decay_gamma": 0.5}
