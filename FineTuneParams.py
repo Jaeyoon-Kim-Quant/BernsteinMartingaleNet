@@ -32,11 +32,11 @@ parser = argparse.ArgumentParser()
 args = parser.parse_args(args=[])
 # override manually
 
-args.dist_type = "SkewedStudentT" #"SkewedStudentT" #"BLogistic" #"SkewedStudentT" #StudentT Normal #SkewedStudentT #BLogistic
-args.dist_param = "16"
-
+args.dist_type = "BLogistic" #"SkewedStudentT" #"BLogistic" #"SkewedStudentT" #StudentT Normal #SkewedStudentT #BLogistic
+args.dist_param = "32"
 
 def set_seed(seed=42):
+
     """Set all random seeds for reproducibility"""
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -76,41 +76,72 @@ else:
 
 folder_path = root + "/MarketData/historical_data"
 
-lr = 0.001
-decay_step = 150
-decay_gamma = 0.5
+candidate_layer_sizes = [
+
+    [128, 64, 32],
+
+    [256, 256, 128, 64],
+    [256, 128, 64, 32],
+    [128, 64, 32, 16],
+    [64, 32, 16, 8],
+
+    [256, 128, 64],
+    [64, 32, 16],
+
+    [128, 64],
+    [64, 32],
+
+]
+
+
+lr = 0.002
 weight_decay = 0.000
-num_steps = 400 + 1
+num_steps = 800 + 1
 batch_size = 1024
 dropout_ratio = 0.2
 
-candidate_layer_sizes = [
-    [256, 128, 64]
-    #[128, 64, 32],
-    [64, 32, 16],
-    [64, 32],
-    [128, 64],
-    [32, 16],
-]
+for layer_size in candidate_layer_sizes:
 
-for feature_size in [1, 2]:
+    for feature_size in [3, 2, 1]:
 
-    train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path,
+        train_xs, train_ys, train_rv, dev_xs, dev_ys, dev_rv, test_xs, test_ys, test_rv = get_normalized_data(folder_path,
                                                                                                           feature_size,
                                                                                                           device, 0.2,
                                                                                                           0.2,
                                                                                                           force_recompute=True)
-    for layer_sizes in candidate_layer_sizes:
+
+        # add data perturbation
+        noise = 0.001
+        noise = torch.tensor(noise, device=device)
+        num_perturbations = 4
+        synthetic_train_xs = []
+        for i in range(num_perturbations):
+            new_xs = train_xs.clone()
+            new_xs[:, :, :2] = new_xs[:, :, :2] * torch.sqrt(1 - noise) + torch.randn_like(
+                new_xs[:, :, :2]) * torch.sqrt(noise)
+            synthetic_train_xs.append(new_xs)
+        synthetic_train_xs = torch.concat(synthetic_train_xs, dim=0)
+
+        synthetic_train_ys = torch.concat([train_ys.clone() for i in range(num_perturbations)], dim=0)
+        total_train_xs = torch.concat([train_xs, synthetic_train_xs], dim=0)
+        total_train_ys = torch.concat([train_ys, synthetic_train_ys], dim=0)
+        # shuffle total_train_xs and total_train_ys
+        indices = torch.randperm(total_train_xs.shape[0])
+        total_train_xs = total_train_xs[indices]
+        total_train_ys = total_train_ys[indices]
+
+        print("total_train_xs.shape", total_train_xs.shape)
+
         architecture = AdjustedMichenkow
         model = architecture(dist_head, device, feature_size=feature_size,
-                         layer_sizes=layer_sizes, dropout_ratio=dropout_ratio)
+                         layer_sizes=layer_size, dropout_ratio=dropout_ratio)
 
-        layer_size_str = "-".join(list(map(lambda x: str(x), layer_sizes)))
-        output_folder = f"MichenkowResults/{args.dist_type}{_output_folder_name(feature_size)}_{layer_size_str}"
+        layer_size_str = "-".join(list(map(lambda x: str(x), layer_size)))
+        output_folder = (f"Results/LayerSizesCompare/SyntheticData/{args.dist_type}"
+                         f"{_output_folder_name(feature_size)}_{layer_size_str}_{args.dist_param}")
 
-        _, train_losses, dev_losses = train_model(model, train_xs, train_ys, dev_xs, dev_ys, test_xs, test_ys,
+        _, train_losses, dev_losses = train_model(model, total_train_xs, total_train_ys, dev_xs, dev_ys,
+                                                  test_xs, test_ys,
                                lr, weight_decay, num_steps, batch_size=batch_size, device=device,
-                               output_folder=output_folder, lr_decay_step=decay_step, lr_decay_gamma=decay_gamma,
-                               verbose=True,
-                               only_dev_loss=False)
+                               output_folder=output_folder)
 
